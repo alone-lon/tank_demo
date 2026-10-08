@@ -229,7 +229,7 @@ class Tank extends Entity {
     this.fireRate = 400; // ms，每0.4秒可发射一次
   }
 
-  move(dx, dy, mapBricks, mapSteels) {
+  move(dx, dy, mapBricks, mapSteels, otherTanks = []) {
     const prevX = this.x;
     const prevY = this.y;
     this.x += dx;
@@ -250,6 +250,17 @@ class Tank extends Entity {
     // 钢板碰撞检测
     for (const s of mapSteels) {
       if (aabb(this.rect(), s)) {
+        this.x = prevX;
+        this.y = prevY;
+        return;
+      }
+    }
+    // 河流碰撞检测（如果传入）
+    // TODO: rivers 可以加在这里
+    // 坦克间碰撞检测（防止重叠）
+    for (const t of otherTanks) {
+      if (t === this || !t.active) continue;
+      if (aabb(this.rect(), t.rect())) {
         this.x = prevX;
         this.y = prevY;
         return;
@@ -398,7 +409,7 @@ class PlayerTank extends Tank {
    * @param {GameMap} gameMap - 地图对象（含所有瓦片类型）
    * @returns {Bullet|null} 发射的子弹
    */
-  update(keys, gameMap) {
+  update(keys, gameMap, otherTanks = []) {
     let dx = 0, dy = 0;
     if (keys['ArrowUp'] || keys['KeyW'])   { dy = -this.speed; this.dir = 'up'; }
     if (keys['ArrowDown'] || keys['KeyS'])  { dy = this.speed;  this.dir = 'down'; }
@@ -406,10 +417,10 @@ class PlayerTank extends Tank {
     if (keys['ArrowRight'] || keys['KeyD']) { dx = this.speed;  this.dir = 'right'; }
     // 斜向移动归一化（保持速度一致）
     if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
-    // 传入真实的地图碰撞体（砖块+钢板+河流）
+    // 传入真实的地图碰撞体（砖块+钢板+河流）和其他坦克
     if (dx !== 0 || dy !== 0) {
       const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers];
-      this.move(dx, dy, solids, []);
+      this.move(dx, dy, solids, otherTanks);
     }
     // 无敌时间递减
     if (this.invincible) {
@@ -448,7 +459,7 @@ class EnemyTank extends Tank {
     this.currentDir = 'down';
   }
 
-  update(dt, gameMap) {
+  update(dt, gameMap, otherTanks = []) {
     this.aiTimer += dt;
     if (this.bulletCooldown > 0) this.bulletCooldown -= dt;
 
@@ -461,7 +472,7 @@ class EnemyTank extends Tank {
     const vec = dirToVec(this.currentDir);
     this.dir = this.currentDir;
     const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers];
-    this.move(vec.dx * this.speed, vec.dy * this.speed, solids, []);
+    this.move(vec.dx * this.speed, vec.dy * this.speed, solids, otherTanks);
 
     // 随机射击
     if (Math.random() < 0.02) {
@@ -731,7 +742,7 @@ class Game {
   }
 
   /** 在指定区域内找一个安全的生成位置（不在固体瓦片内） */
-  _findSafeSpawn(bricks, steels, options = {}) {
+  _findSafeSpawn(bricks, steels, options = {}, otherTanks = []) {
     const { minCol = 1, maxCol = COLS - 2, minRow = 1, maxRow = ROWS - 2 } = options;
     const tankW = 36; // 坦克宽度
     const tankH = 36; // 坦克高度
@@ -748,6 +759,13 @@ class Game {
       if (!solid) {
         for (const s of steels) { if (aabb(rect_, s)) { solid = true; break; } }
       }
+      // 检测是否与其他坦克重叠
+      if (!solid) {
+        for (const t of otherTanks) {
+          if (t === null) continue;
+          if (aabb(rect_, t.rect())) { solid = true; break; }
+        }
+      }
       if (!solid) return { x, y };
       attempts++;
     }
@@ -762,9 +780,10 @@ class Game {
     const count = Math.min(4, this.enemiesPerLevel - this.enemiesSpawned);
     for (let i = 0; i < count; i++) {
       // 敌方只在地图最顶部第0行生成（远离基地）
+      // 传入所有现有坦克避免重叠
       const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
         minCol: 1, maxCol: COLS - 2, minRow: 0, maxRow: 0
-      });
+      }, [this.player, ...this.enemies]);
       this.enemies.push(new EnemyTank(pos.x, pos.y));
       this.enemiesSpawned++;
     }
@@ -775,7 +794,7 @@ class Game {
     if (this.enemiesSpawned >= this.enemiesPerLevel) return;
     const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
       minCol: 1, maxCol: COLS - 2, minRow: 0, maxRow: 0
-    });
+    }, [this.player, ...this.enemies]);
     this.enemies.push(new EnemyTank(pos.x, pos.y));
     this.enemiesSpawned++;
   }
@@ -856,15 +875,20 @@ class Game {
   }
 
   _update(dt) {
-    // 更新玩家
-    const pBullet = this.player.update(this.keys, this.map);
+    // 更新玩家（传入其他坦克，排除自己）
+    const pBullet = this.player.update(this.keys, this.map, [
+      ...this.enemies.filter(e => e.active && e !== this.player)
+    ]);
     if (pBullet) this.bullets.push(pBullet);
     if (this.player.bulletCooldown > 0) this.player.bulletCooldown -= dt;
 
-    // 更新敌方
+    // 更新敌方（每个敌人传入其他坦克，排除自己）
     for (const e of this.enemies) {
       if (!e.active) continue;
-      const eBullet = e.update(dt, this.map);
+      const eBullet = e.update(dt, this.map, [
+        this.player,
+        ...this.enemies.filter(en => en.active && en !== e)
+      ]);
       if (eBullet) this.bullets.push(eBullet);
     }
 
