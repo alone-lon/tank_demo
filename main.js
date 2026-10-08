@@ -226,7 +226,7 @@ class Tank extends Entity {
     this.color = color;
     this.speed = PLAYER_SPEED;
     this.bulletCooldown = 0;
-    this.fireRate = 1000; // ms，每1秒可发射一次
+    this.fireRate = 400; // ms，每0.4秒可发射一次
   }
 
   move(dx, dy, mapBricks, mapSteels) {
@@ -695,7 +695,6 @@ class Game {
     this.lives = 3;
     this.enemiesPerLevel = 20;
     this.maxOnScreen = 4;
-    this.spawnTimer = 0;
     this.enemiesSpawned = 0;
     this.isTransitioning = true; // 进入过场动画
 
@@ -769,6 +768,16 @@ class Game {
       this.enemies.push(new EnemyTank(pos.x, pos.y));
       this.enemiesSpawned++;
     }
+  }
+
+  /** 补充一个敌人（当敌人被击毁时调用） */
+  _respawnOne() {
+    if (this.enemiesSpawned >= this.enemiesPerLevel) return;
+    const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
+      minCol: 1, maxCol: COLS - 2, minRow: 0, maxRow: 0
+    });
+    this.enemies.push(new EnemyTank(pos.x, pos.y));
+    this.enemiesSpawned++;
   }
 
   /** 更新HUD显示 */
@@ -885,8 +894,13 @@ class Game {
             b.active = false;
             this.score += 100;
             this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2));
-            // 检测是否清空本波敌人
-            if (this.enemies.filter(en => en.active).length === 0) {
+            // 敌人被击毁后立即补充一个（如果本关还没打完）
+            if (this.enemiesSpawned < this.enemiesPerLevel && !this.isTransitioning) {
+              this._respawnOne();
+            }
+            // 检测是否全部20个敌人都已击毁
+            if (this.enemiesSpawned >= this.enemiesPerLevel &&
+                this.enemies.length === 0) {
               this._nextLevel();
             }
           }
@@ -932,13 +946,11 @@ class Game {
     this.powerups = this.powerups.filter(p => p.active);
 
     // 自动刷新生成（同屏少于4个且未发完所有敌人，且不在过场中）
+    // 注：现在改为"死一个补一个"模式，此定时器仅处理初始波次生成
     if (!this.isTransitioning && this.enemiesSpawned < this.enemiesPerLevel &&
-        this.enemies.filter(e => e.active).length < this.maxOnScreen) {
-      this.spawnTimer += dt;
-      if (this.spawnTimer >= 2000) { // 每2秒尝试生成
-        this.spawnTimer = 0;
-        this._spawnWave();
-      }
+        this.enemies.length === 0) {
+      // 无敌人时触发补充
+      this._spawnWave();
     }
 
     // 检测关卡完成（且不在过场中）
