@@ -1,0 +1,130 @@
+/* ==================== 全局样式 ==================== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #1a1a2e;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: 'Segoe UI', sans-serif;
+  color: #eee;
+}
+
+#game-container {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ==================== HUD ==================== */
+#hud {
+  display: flex;
+  gap: 24px;
+  padding: 10px 20px;
+  background: #16213e;
+  border-radius: 8px;
+  border: 1px solid #0f3460;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-label {
+  font-size: 11px;
+  color: #8899aa;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.hud-value {
+  font-size: 20px;
+  font-weight: bold;
+  color: #e2e2e2;
+}
+
+.lives-green { color: #4ade80; }
+.lives-red { color: #f87171; }
+
+/* ==================== Canvas ==================== */
+#gameCanvas {
+  border: 2px solid #0f3460;
+  border-radius: 4px;
+  background: #0a0a14;
+  display: block;
+}
+
+/* ==================== 覆盖层 ==================== */
+.overlay {
+  position: absolute;
+  top: 56px; /* HUD 高度 */
+  left: 0;
+  width: 520px;
+  height: 520px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(10, 10, 20, 0.85);
+  border-radius: 4px;
+  z-index: 10;
+}
+
+.overlay.hidden {
+  display: none;
+}
+
+.overlay-content {
+  text-align: center;
+}
+
+#overlay-title {
+  font-size: 48px;
+  margin-bottom: 16px;
+  color: #f5c542;
+  text-shadow: 0 0 20px rgba(245, 197, 66, 0.5);
+}
+
+#overlay-subtitle {
+  font-size: 16px;
+  color: #8899aa;
+  margin-bottom: 24px;
+  line-height: 1.8;
+}
+
+.hint-text {
+  font-size: 18px;
+  color: #aaa;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  background: #0f3460;
+  border: 1px solid #1a5276;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 14px;
+  color: #f5c542;
+}
+
+.final-score {
+  font-size: 28px;
+  color: #4ade80;
+  margin-top: 16px;
+}
