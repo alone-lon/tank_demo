@@ -73,7 +73,7 @@ const LEVELS = [
     [0,1,0,1,1,0,0,0,1,1,0,1,0],
     [0,1,0,1,1,0,0,0,1,1,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,1,0,1,1,0,0,0,1,1,0,1,0],
+    [0,0,0,0,0,1,1,1,0,0,0,0,0], // 基地前方加砖墙保护（3格宽）
     [0,0,0,1,1,1,6,1,1,1,0,0,0],
     [0,0,0,1,1,1,6,1,1,1,0,0,0],
   ],
@@ -89,7 +89,7 @@ const LEVELS = [
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,1,0,1,1,0,0,0,1,1,0,1,0],
+    [0,0,0,0,0,1,1,1,0,0,0,0,0], // 基地前方加砖墙保护（3格宽）
     [0,0,0,1,1,1,6,1,1,1,0,0,0],
     [0,0,0,1,1,1,6,1,1,1,0,0,0],
   ],
@@ -662,6 +662,7 @@ class Game {
     this.subtitleEl = document.getElementById('overlay-subtitle');
     this.hintEl = document.getElementById('overlay-hint');
     this.scoreElFinal = document.getElementById('overlay-score');
+    this.progressEl = document.getElementById('progress-display'); // 关卡进度
 
     this._bindInput();
     this._loop = this._loop.bind(this);
@@ -689,12 +690,35 @@ class Game {
    * 玩家出生在安全空位（不卡在墙里）
    */
   _startGame() {
-    this.state = 'PLAYING';
     this.score = 0;
     this.level = 0;
     this.lives = 3;
+    this.enemiesPerLevel = 20;
+    this.maxOnScreen = 4;
+    this.spawnTimer = 0;
+    this.enemiesSpawned = 0;
+    this.isTransitioning = true; // 进入过场动画
+
+    // 显示开始界面
+    this.titleEl.textContent = '🎮 坦克大战';
+    this.subtitleEl.textContent = 'WASD/方向键移动 · 空格射击';
+    this.hintEl.textContent = '按回车开始游戏';
+    this.hintEl.style.display = 'block';
+    this.scoreElFinal.style.display = 'none';
+    this.overlay.classList.remove('hidden');
+
+    // 延迟0.5秒后开始游戏（与下一关过场一致）
+    setTimeout(() => {
+      this._doStartGame();
+    }, 500);
+  }
+
+  /** 实际开始游戏的逻辑 */
+  _doStartGame() {
+    this.state = 'PLAYING';
+    this.isTransitioning = false;
+    this.overlay.classList.add('hidden');
     this.map = new GameMap(this.level);
-    // 玩家出生在基地左上方安全位置
     const playerPos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
       minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 12
     });
@@ -703,40 +727,47 @@ class Game {
     this.bullets = [];
     this.explosions = [];
     this.powerups = [];
-    this._spawnWave(4); // 第一批4个敌人
+    this._spawnWave();
     this._updateHUD();
-    this.overlay.classList.add('hidden');
   }
 
   /** 在指定区域内找一个安全的生成位置（不在固体瓦片内） */
   _findSafeSpawn(bricks, steels, options = {}) {
     const { minCol = 1, maxCol = COLS - 2, minRow = 1, maxRow = ROWS - 2 } = options;
+    const tankW = 36; // 坦克宽度
+    const tankH = 36; // 坦克高度
     let attempts = 0;
-    while (attempts < 100) {
+    while (attempts < 200) {
       const c = randInt(minCol, maxCol);
       const r = randInt(minRow, maxRow);
       const x = c * TILE;
       const y = r * TILE;
-      const centerRect = rect(x + 18, y + 18, 36, 36);
+      // 坦克矩形（比瓦片小一点，避免卡墙）
+      const rect_ = rect(x + 2, y + 2, tankW - 4, tankH - 4);
       let solid = false;
-      for (const b of bricks) { if (aabb(centerRect, b)) { solid = true; break; } }
+      for (const b of bricks) { if (aabb(rect_, b)) { solid = true; break; } }
       if (!solid) {
-        for (const s of steels) { if (aabb(centerRect, s)) { solid = true; break; } }
+        for (const s of steels) { if (aabb(rect_, s)) { solid = true; break; } }
       }
       if (!solid) return { x, y };
       attempts++;
     }
-    // 退路：返回一个默认位置
-    return { x: 6 * TILE, y: 11 * TILE };
+    // 无法找到安全位置，返回区域中心
+    const centerC = Math.floor((minCol + maxCol) / 2);
+    const centerR = Math.floor((minRow + maxRow) / 2);
+    return { x: centerC * TILE, y: centerR * TILE };
   }
 
-  /** 生成一批敌人 */
-  _spawnWave(count) {
+  /** 生成下一波敌人（最多4个） */
+  _spawnWave() {
+    const count = Math.min(4, this.enemiesPerLevel - this.enemiesSpawned);
     for (let i = 0; i < count; i++) {
+      // 敌方只在地图最顶部第0行生成（远离基地）
       const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
-        minCol: 1, maxCol: COLS - 2, minRow: 1, maxRow: 4
+        minCol: 1, maxCol: COLS - 2, minRow: 0, maxRow: 0
       });
       this.enemies.push(new EnemyTank(pos.x, pos.y));
+      this.enemiesSpawned++;
     }
   }
 
@@ -745,9 +776,10 @@ class Game {
     this.scoreEl.textContent = this.score;
     this.livesEl.textContent = '♥'.repeat(Math.max(0, this.player?.lives || 0));
     this.livesEl.className = 'hud-value ' + (this.player?.lives > 1 ? 'lives-green' : 'lives-red');
-    this.enemiesEl.textContent = this.enemies.filter(e => e.active).length;
-    this.waveEl.textContent = '波 ' + (this.level + 1);
+    this.enemiesEl.textContent = this.enemies.filter(e => e.active).length + '/' + this.maxOnScreen;
+    this.waveEl.textContent = '波 ' + Math.ceil(this.enemiesSpawned / 4);
     this.levelEl.textContent = '关卡 ' + (this.level + 1);
+    this.progressEl.textContent = this.enemiesSpawned + '/' + this.enemiesPerLevel;
   }
 
   /** 显示游戏结束/胜利界面 */
@@ -766,23 +798,40 @@ class Game {
     this.overlay.classList.remove('hidden');
   }
 
-  /** 进入下一关 */
+  /** 进入下一关（带过场动画） */
   _nextLevel() {
     this.level++;
-    this.map = new GameMap(this.level); // 加载下一关（循环使用预设关卡）
-    this.enemies = [];
-    this.bullets = [];
-    this.powerups = [];
-    // 玩家在基地左上方重生
-    const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
-      minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 12
-    });
-    this.player.x = pos.x;
-    this.player.y = pos.y;
-    this.player.active = true;
-    this.player.lives = Math.min(this.player.lives + 1, 5); // 每关加1命，最多5
-    this._spawnWave(4 + this.level); // 每关多2个敌人
-    this._updateHUD();
+    this.isTransitioning = true; // 暂停游戏逻辑
+    // 显示关卡完成提示
+    this.titleEl.textContent = '🎉 关卡 ' + this.level + ' 完成！';
+    this.subtitleEl.textContent = '准备进入下一关...';
+    this.hintEl.textContent = '';
+    this.hintEl.style.display = 'none';
+    this.scoreElFinal.style.display = 'none';
+    this.overlay.classList.remove('hidden');
+
+    // 0.5秒后切换关卡
+    setTimeout(() => {
+      this.overlay.classList.add('hidden');
+      this.isTransitioning = false; // 恢复游戏逻辑
+      this.map = new GameMap(this.level % LEVELS.length);
+      this.enemies = [];
+      this.bullets = [];
+      this.explosions = [];
+      this.powerups = [];
+      this.enemiesSpawned = 0;
+      this.spawnTimer = 0;
+      // 玩家在基地左上方重生
+      const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
+        minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 12
+      });
+      this.player.x = pos.x;
+      this.player.y = pos.y;
+      this.player.active = true;
+      this.player.lives = Math.min(this.player.lives + 1, 5); // 每关加1命，最多5
+      this._spawnWave(); // 生成第一批敌人
+      this._updateHUD();
+    }, 500);
   }
 
   // ── 主循环 ──────────────────────────────────────────────
@@ -881,6 +930,22 @@ class Game {
     this.enemies = this.enemies.filter(e => e.active);
     this.explosions = this.explosions.filter(e => { e.update(dt); return e.active; });
     this.powerups = this.powerups.filter(p => p.active);
+
+    // 自动刷新生成（同屏少于4个且未发完所有敌人，且不在过场中）
+    if (!this.isTransitioning && this.enemiesSpawned < this.enemiesPerLevel &&
+        this.enemies.filter(e => e.active).length < this.maxOnScreen) {
+      this.spawnTimer += dt;
+      if (this.spawnTimer >= 2000) { // 每2秒尝试生成
+        this.spawnTimer = 0;
+        this._spawnWave();
+      }
+    }
+
+    // 检测关卡完成（且不在过场中）
+    if (!this.isTransitioning && this.enemiesSpawned >= this.enemiesPerLevel &&
+        this.enemies.length === 0) { // 所有敌人已死亡（数组为空）
+      this._nextLevel();
+    }
 
     this._updateHUD();
   }
