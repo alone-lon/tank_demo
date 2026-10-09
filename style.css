@@ -62,6 +62,8 @@ body {
   border-radius: 4px;
   background: #0a0a14;
   display: block;
+  width: 520px;
+  height: 520px;
 }
 
 /* ==================== 覆盖层 ==================== */

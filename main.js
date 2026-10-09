@@ -27,6 +27,21 @@ function randDir() {
   return dirs[randInt(0, dirs.length - 1)];
 }
 
+/** 格子对齐：将坐标对齐到最近的格子边界（±TILE/2 范围内） */
+function snapToGrid(pos) {
+  return Math.round(pos / TILE) * TILE;
+}
+
+/** 判断坦克是否已接近格子边界（允许转向） */
+function isAligned(tank) {
+  const margin = 8; // 像素容差
+  const cx = tank.x + tank.w / 2;
+  const cy = tank.y + tank.h / 2;
+  const gx = snapToGrid(cx);
+  const gy = snapToGrid(cy);
+  return Math.abs(cx - gx) < margin && Math.abs(cy - gy) < margin;
+}
+
 /** 方向转 dx/dy */
 function dirToVec(dir) {
   switch (dir) {
@@ -48,6 +63,14 @@ const PLAYER_SPEED = 2;
 const BULLET_SPEED = 6;
 const ENEMY_SPEED = 1;
 
+// 敌方坦克类型配置
+const ENEMY_TYPES = {
+  LIGHT: { name: 'light', color: '#f0f0f0', speed: ENEMY_SPEED, hp: 1, score: 100, fireRate: 1500 },
+  ARMOR: { name: 'armor', color: '#a0a0a0', speed: ENEMY_SPEED * 1.5, hp: 1, score: 200, fireRate: 1500 },
+  SPEED: { name: 'speed', color: '#87ceeb', speed: ENEMY_SPEED * 0.7, hp: 1, score: 300, fireRate: 1000 },
+  HEAVY: { name: 'heavy', color: '#90EE90', speed: ENEMY_SPEED, hp: 4, score: 400, fireRate: 2000 },
+};
+
 // 地形类型
 const T = {
   EMPTY: 0,   // 空地
@@ -55,13 +78,13 @@ const T = {
   STEEL: 2,   // 钢板（不可破坏）
   GRASS: 3,   // 草丛（遮挡显示，可通过）
   RIVER: 4,   // 河流（坦克不能通过，子弹能通过）
-  ICE: 5,     // 冰面（打滑）
-  BASE: 6     // 基地老鹰
+  ICE: 5,     // 雪地（打滑，坦克移动方向随机偏移）
+  BASE: 6,    // 基地老鹰
 };
 
 // 预设关卡（13×13）
 const LEVELS = [
-  // Level 1
+  // Level 1 - 对称迷宫
   [
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,1,0,1,1,0,1,1,0,1,1,0],
@@ -70,28 +93,76 @@ const LEVELS = [
     [0,1,0,2,2,0,0,0,2,2,0,1,0],
     [0,1,0,2,2,0,0,0,2,2,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,1,1,0,1,1,0,1,1,0,1,1,0],
+    [0,1,1,0,1,1,0,1,1,0,1,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,0,1,1,0,0,0,1,1,0,1,0],
     [0,1,0,1,1,0,0,0,1,1,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,1,1,0,0,0,0,0], // 基地前方加砖墙保护（3格宽）
-    [0,0,0,1,1,1,6,1,1,1,0,0,0],
-    [0,0,0,1,1,1,6,1,1,1,0,0,0],
   ],
-  // Level 2
+  // Level 2 - 雪地战场
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,5,5,0,1,1,0,1,1,0,5,5,0],
+    [0,5,5,0,1,1,0,1,1,0,5,5,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,1,0,2,0,1,0,1,0,2,0,1,0],
+    [0,1,0,2,0,1,0,1,0,2,0,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,5,0,1,0,5,0,5,0,1,0,5,0],
+    [0,5,0,1,0,5,0,5,0,1,0,5,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,1,1,0,1,1,0,1,1,0,1,1,0],
+    [0,1,1,0,1,1,0,1,1,0,1,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  // Level 3 - 钢铁堡垒
   [
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,2,0,0,0,2,0,2,0,0,0,2,0],
+    [0,2,0,0,0,2,0,2,0,0,0,2,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,0,2,0,1,0,1,0,2,0,1,0],
     [0,1,0,2,0,1,0,1,0,2,0,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,2,0,0,0,2,0,2,0,0,0,2,0],
+    [0,2,0,0,0,2,0,2,0,0,0,2,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  // Level 4 - 冰河纵横
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,5,5,5,5,5,0,5,5,5,5,5,0],
+    [0,5,5,5,5,5,0,5,5,5,5,5,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
-    [0,0,0,0,0,1,1,1,0,0,0,0,0], // 基地前方加砖墙保护（3格宽）
-    [0,0,0,1,1,1,6,1,1,1,0,0,0],
-    [0,0,0,1,1,1,6,1,1,1,0,0,0],
+    [0,2,0,2,0,2,0,2,0,2,0,2,0],
+    [0,2,0,2,0,2,0,2,0,2,0,2,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,5,0,5,0,5,0,5,0,5,0,5,0],
+    [0,5,0,5,0,5,0,5,0,5,0,5,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
+  // Level 5 - 混合攻防
+  [
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,1,1,0,1,1,0,1,1,0,1,1,0],
+    [0,1,1,0,1,1,0,1,1,0,1,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,5,0,5,0,5,0,5,0,5,0,5,0],
+    [0,5,0,5,0,5,0,5,0,5,0,5,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,2,2,0,2,2,0,2,2,0,2,2,0],
+    [0,2,2,0,2,2,0,2,2,0,2,2,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,1,0,1,0,1,0,1,0,1,0,1,0],
+    [0,1,0,1,0,1,0,1,0,1,0,1,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0],
   ],
 ];
 
@@ -151,33 +222,139 @@ class Bullet extends Entity {
 
 // ─── 爆炸特效 ──────────────────────────────────────────────
 
-class Explosion {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
+class Explosion extends Entity {
+  constructor(x, y, isBig = false) {
+    const r = isBig ? 30 : 20; // 爆炸半径
+    super(x - r, y - r, r * 2, r * 2); // 以坦克中心点为中心
+    this.cx = x; // 爆炸中心点
+    this.cy = y;
     this.timer = 0;
-    this.maxTime = 300; // ms
+    this.maxTime = isBig ? 500 : 350; // 缩短爆炸时间
+    this.isBig = isBig;
+
+    // 生成多层冲击波
+    const ringCount = isBig ? 4 : 2;
+    this.rings = [];
+    for (let i = 0; i < ringCount; i++) {
+      this.rings.push({
+        delay: i * 50,
+        maxRadius: isBig ? (25 + i * 12) : (15 + i * 8)
+      });
+    }
+
+    // 生成碎片粒子（减少数量）
+    const particleCount = isBig ? 16 : 8;
+    this.particles = [];
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (Math.PI * 2 / particleCount) * i + Math.random() * 0.5;
+      const speed = (isBig ? 2 : 1.2) + Math.random() * 1.5;
+      this.particles.push({
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        size: (isBig ? 3 : 2) + Math.random() * 3,
+        life: (isBig ? 350 : 250) + Math.random() * 150
+      });
+    }
+
+    // 烟雾粒子（减少）
+    this.smoke = [];
+    for (let i = 0; i < (isBig ? 5 : 3); i++) {
+      const angle = Math.random() * Math.PI * 2;
+      this.smoke.push({
+        vx: Math.cos(angle) * 0.4,
+        vy: Math.sin(angle) * 0.4 - 0.2,
+        size: 5 + Math.random() * 5,
+        life: 400 + Math.random() * 150
+      });
+    }
   }
 
   update(dt) {
     this.timer += dt;
     if (this.timer >= this.maxTime) this.active = false;
+    // 更新粒子位置
+    for (const p of this.particles) {
+      p.life -= dt;
+      p.x = (p.x || 0) + p.vx;
+      p.y = (p.y || 0) + p.vy;
+      p.vx *= 0.96;
+      p.vy *= 0.96;
+    }
+    // 更新烟雾
+    for (const s of this.smoke) {
+      s.life -= dt;
+      s.x = (s.x || 0) + s.vx;
+      s.y = (s.y || 0) + s.vy;
+    }
   }
 
   draw(ctx) {
     const progress = this.timer / this.maxTime;
-    const radius = 20 * (1 + progress);
-    const alpha = 1 - progress;
+    const cx = this.cx; // 爆炸中心点
+    const cy = this.cy;
     ctx.save();
-    ctx.globalAlpha = alpha;
+
+    // 绘制冲击波
+    for (const ring of this.rings) {
+      const ringProgress = Math.max(0, (this.timer - ring.delay) / (this.maxTime * 0.6));
+      if (ringProgress <= 0) continue;
+      const radius = ring.maxRadius * ringProgress;
+      const alpha = (1 - ringProgress) * 0.8;
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#f5c542';
+      ctx.lineWidth = 4 * (1 - ringProgress);
+      ctx.shadowColor = '#f5c542';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // 绘制中心火球
+    const fireRadius = (this.isBig ? 20 : 14) * (1 - progress * 0.3);
+    ctx.globalAlpha = 1 - progress;
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 15;
     ctx.fillStyle = '#f5c542';
     ctx.beginPath();
-    ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+    ctx.arc(cx, cy, fireRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#ef4444';
     ctx.beginPath();
-    ctx.arc(this.x, this.y, radius * 0.6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, fireRadius * 0.7, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, fireRadius * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 绘制碎片粒子
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    for (const p of this.particles) {
+      if (p.life <= 0) continue;
+      const px = cx + p.x;
+      const py = cy + p.y;
+      const alpha = Math.min(1, p.life / 200);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = Math.random() > 0.5 ? '#f5c542' : '#ef4444';
+      ctx.fillRect(px - p.size / 2, py - p.size / 2, p.size, p.size);
+    }
+
+    // 绘制烟雾
+    ctx.globalAlpha = 1;
+    for (const s of this.smoke) {
+      if (s.life <= 0) continue;
+      const sx = cx + s.x;
+      const sy = cy + s.y;
+      const alpha = Math.min(0.4, s.life / 400);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#555';
+      ctx.beginPath();
+      ctx.arc(sx, sy, s.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 }
@@ -227,45 +404,51 @@ class Tank extends Entity {
     this.speed = PLAYER_SPEED;
     this.bulletCooldown = 0;
     this.fireRate = 400; // ms，每0.4秒可发射一次
+    // 复活闪烁动画
+    this.respawnAnim = 0;    // 动画计时器
+    this.isRespawning = false; // 是否处于复活状态
   }
 
-  move(dx, dy, mapBricks, mapSteels, otherTanks = []) {
+  /** 开始复活动画 */
+  startRespawnAnim(duration = 800) {
+    this.isRespawning = true;
+    this.respawnAnim = 0;
+    this.respawnDuration = duration;
+  }
+
+  move(dx, dy, mapSolids = [], otherTanks = []) {
     const prevX = this.x;
     const prevY = this.y;
-    this.x += dx;
-    this.y += dy;
 
-    // 边界限制
-    this.x = Math.max(0, Math.min(this.x, CW - this.w));
-    this.y = Math.max(0, Math.min(this.y, CH - this.h));
+    // 1. 边界限制
+    const clampedX = Math.max(0, Math.min(prevX + dx, CW - this.w));
+    const clampedY = Math.max(0, Math.min(prevY + dy, CH - this.h));
 
-    // 砖墙碰撞检测
-    for (const b of mapBricks) {
-      if (aabb(this.rect(), b)) {
-        this.x = prevX;
-        this.y = prevY;
-        return;
-      }
-    }
-    // 钢板碰撞检测
-    for (const s of mapSteels) {
-      if (aabb(this.rect(), s)) {
-        this.x = prevX;
-        this.y = prevY;
-        return;
-      }
-    }
-    // 河流碰撞检测（如果传入）
-    // TODO: rivers 可以加在这里
-    // 坦克间碰撞检测（防止重叠）
+    // 2. 分轴独立检测碰撞，允许沿墙滑动
+    // 先尝试移动X轴
+    const testRectX = { x: clampedX, y: prevY, w: this.w, h: this.h };
+    const hitWallX = mapSolids.some(s => aabb(testRectX, s));
+    let finalX = hitWallX ? prevX : clampedX;
+
+    // 再尝试移动Y轴（使用已确定的finalX）
+    const testRectY = { x: finalX, y: clampedY, w: this.w, h: this.h };
+    const hitWallY = mapSolids.some(s => aabb(testRectY, s));
+    let finalY = hitWallY ? prevY : clampedY;
+
+    // 3. 坦克间碰撞（分轴独立）
     for (const t of otherTanks) {
       if (t === this || !t.active) continue;
-      if (aabb(this.rect(), t.rect())) {
-        this.x = prevX;
-        this.y = prevY;
-        return;
-      }
+      const tr = t.rect();
+      // X轴碰撞
+      const testTX = { x: clampedX, y: prevY, w: this.w, h: this.h };
+      if (aabb(testTX, tr)) finalX = prevX;
+      // Y轴碰撞
+      const testTY = { x: finalX, y: clampedY, w: this.w, h: this.h };
+      if (aabb(testTY, tr)) finalY = prevY;
     }
+
+    this.x = finalX;
+    this.y = finalY;
   }
 
   /**
@@ -293,6 +476,28 @@ class Tank extends Entity {
 
     ctx.save();
     ctx.translate(cx, cy);
+
+    // 复活闪烁效果 - 黑白交替闪烁
+    if (this.isRespawning && this.respawnAnim < this.respawnDuration) {
+      this.respawnAnim += 16; // 每帧约16ms
+      const flashPhase = Math.sin(this.respawnAnim * 0.02);
+      // 闪烁时覆盖白色/透明层
+      ctx.fillStyle = flashPhase > 0 ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(0, 0, 22, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 闪烁红光坦克效果（第4、11、18辆）
+    if (this.isFlashing) {
+      const flash = Math.sin(Date.now() * 0.01) > 0;
+      if (flash) {
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 22, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
     // ── 阴影（地面投影，增强2.5D感）──────────────────────
     ctx.save();
@@ -401,6 +606,10 @@ class PlayerTank extends Tank {
     this.level = 0; // 火力等级 0-3
     this.invincible = false;
     this.invincibleTime = 0;
+    this.shielded = false; // 铲子护盾
+    this.shieldTime = 0;
+    this.frozen = false; // 被秒表冻结
+    this.frozenTime = 0;
   }
 
   /**
@@ -411,32 +620,72 @@ class PlayerTank extends Tank {
    */
   update(keys, gameMap, otherTanks = []) {
     let dx = 0, dy = 0;
-    if (keys['ArrowUp'] || keys['KeyW'])   { dy = -this.speed; this.dir = 'up'; }
-    if (keys['ArrowDown'] || keys['KeyS'])  { dy = this.speed;  this.dir = 'down'; }
-    if (keys['ArrowLeft'] || keys['KeyA'])  { dx = -this.speed; this.dir = 'left'; }
-    if (keys['ArrowRight'] || keys['KeyD']) { dx = this.speed;  this.dir = 'right'; }
-    // 斜向移动归一化（保持速度一致）
-    if (dx !== 0 && dy !== 0) { dx *= 0.707; dy *= 0.707; }
-    // 传入真实的地图碰撞体（砖块+钢板+河流）和其他坦克
+    // 构建固墙体列表（用于对齐检查和碰撞检测）
+    const mapSolids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
+
+    // 格子对齐：切换方向轴时自动吸附到最近的格子线
+    const wantsVertical = keys['ArrowUp'] || keys['KeyW'] || keys['ArrowDown'] || keys['KeyS'];
+    const wantsHorizontal = keys['ArrowLeft'] || keys['KeyA'] || keys['ArrowRight'] || keys['KeyD'];
+    const isVerticalDir = this.dir === 'up' || this.dir === 'down';
+    const isHorizontalDir = this.dir === 'left' || this.dir === 'right';
+    const needAlign = (wantsVertical && isHorizontalDir) || (wantsHorizontal && isVerticalDir);
+
+    if (needAlign) {
+      // 切换方向轴时，自动吸附到最近的格子线
+      // 只要距离格子线小于半个格子（20px）就吸附
+      const snapDist = TILE / 2;
+      const cx = Math.round((this.x + this.w / 2) / TILE) * TILE - this.w / 2;
+      const cy = Math.round((this.y + this.h / 2) / TILE) * TILE - this.h / 2;
+      // 对齐检测：用更小的容差（10px），避免在敌人中间反复抽搐
+      const alignTolerance = 10;
+      if (isVerticalDir && Math.abs(this.x - cx) < alignTolerance) {
+        const testRect = { x: cx, y: this.y, w: this.w, h: this.h };
+        if (!mapSolids.some(s => aabb(testRect, s))) this.x = cx;
+      }
+      if (isHorizontalDir && Math.abs(this.y - cy) < alignTolerance) {
+        const testRect = { x: this.x, y: cy, w: this.w, h: this.h };
+        if (!mapSolids.some(s => aabb(testRect, s))) this.y = cy;
+      }
+    }
+
+    if (keys['ArrowUp'] || keys['KeyW']) { dy = -this.speed; this.dir = 'up'; }
+    if (keys['ArrowDown'] || keys['KeyS']) { dy = this.speed; this.dir = 'down'; }
+    if (keys['ArrowLeft'] || keys['KeyA']) { dx = -this.speed; this.dir = 'left'; }
+    if (keys['ArrowRight'] || keys['KeyD']) { dx = this.speed; this.dir = 'right'; }
+    // 传入真实的地图碰撞体（砖块+钢板+河流）和其他坦克，以及雪地
     if (dx !== 0 || dy !== 0) {
-      const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers];
+      // 统一固墙体列表（砖块+钢板+河流+基地）
+      const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
       this.move(dx, dy, solids, otherTanks);
     }
     // 无敌时间递减
     if (this.invincible) {
-      this.invincibleTime -= 16; // 约每秒60帧
+      this.invincibleTime -= 16;
       if (this.invincibleTime <= 0) this.invincible = false;
     }
-    if (keys['Space']) return this.shoot(this.level + 1); // 玩家子弹穿透力 = 等级+1
+
+    // 护盾时间递减（铲子道具）
+    if (this.shielded) {
+      this.shieldTime -= 16;
+      if (this.shieldTime <= 0) this.shielded = false;
+    }
+
+    // 射击（同屏弹数限制：1级1发，3级2发）
+    if (keys['Space']) {
+      const maxBullets = this.level >= 2 ? 2 : 1;
+      const playerBullets = this.bullets ? this.bullets.filter(b => b.owner === 'player' && b.active).length : 0;
+      if (playerBullets < maxBullets) {
+        return this.shoot(this.level + 1);
+      }
+    }
     return null;
   }
 
   takeDamage() {
-    if (this.invincible) return;
+    if (this.invincible || this.shielded) return;
     this.lives--;
     if (this.lives <= 0) this.active = false;
     else {
-      // 重新无敌2秒
       this.invincible = true;
       this.invincibleTime = 2000;
     }
@@ -451,32 +700,91 @@ class PlayerTank extends Tank {
 // ─── 敌方坦克 ──────────────────────────────────────────────
 
 class EnemyTank extends Tank {
-  constructor(x, y) {
-    super(x, y, 'down', '#f87171');
-    this.speed = ENEMY_SPEED;
+  constructor(x, y, type = 'LIGHT') {
+    const config = ENEMY_TYPES[type] || ENEMY_TYPES.LIGHT;
+    super(x, y, 'down', config.color);
+    this.type = type;
+    this.speed = config.speed;
+    this.hp = config.hp;
+    this.scoreValue = config.score;
     this.aiTimer = 0;
     this.aiInterval = 1500; // ms 换方向间隔
     this.currentDir = 'down';
+    this.fireRate = config.fireRate;
+    this.frozen = false;
+    this.frozenTime = 0;
+  }
+
+  takeDamage() {
+    this.hp--;
+    if (this.hp <= 0) {
+      this.active = false;
+    } else {
+      // 重型坦克血量变化颜色
+      if (this.type === 'HEAVY') {
+        const colors = ['#90EE90', '#FFA500', '#FFD700', '#FFFFFF'];
+        this.color = colors[4 - this.hp] || this.color;
+      }
+    }
+  }
+
+  /** 冻结敌人 */
+  freeze(duration) {
+    this.frozen = true;
+    this.frozenTime = duration;
   }
 
   update(dt, gameMap, otherTanks = []) {
+    // 检查是否被冻结
+    if (this.frozen) {
+      this.frozenTime -= dt;
+      if (this.frozenTime <= 0) {
+        this.frozen = false;
+      }
+      return null;
+    }
+
     this.aiTimer += dt;
     if (this.bulletCooldown > 0) this.bulletCooldown -= dt;
 
-    // 定时换方向
-    if (this.aiTimer >= this.aiInterval) {
+    // AI换方向：撞墙后优先换方向，否则随机
+    const vec = dirToVec(this.currentDir);
+    const prevX = this.x;
+    const prevY = this.y;
+    const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
+
+    // 先测试当前方向是否会撞墙
+    const testRect = {
+      x: Math.max(0, Math.min(prevX + vec.dx * this.speed, CW - this.w)),
+      y: Math.max(0, Math.min(prevY + vec.dy * this.speed, CH - this.h)),
+      w: this.w, h: this.h
+    };
+    const willHitWall = solids.some(s => aabb(testRect, s)) ||
+      otherTanks.some(t => t !== this && t.active && aabb(testRect, t.rect()));
+
+    if (willHitWall || this.aiTimer >= this.aiInterval) {
       this.aiTimer = 0;
-      this.currentDir = randDir();
+      // 优先选择能前进的方向
+      const dirs = ['up', 'down', 'left', 'right'].filter(d => {
+        const v = dirToVec(d);
+        const nx = prevX + v.dx * this.speed;
+        const ny = prevY + v.dy * this.speed;
+        const tx = Math.max(0, Math.min(nx, CW - this.w));
+        const ty = Math.max(0, Math.min(ny, CH - this.h));
+        const tr = { x: tx, y: ty, w: this.w, h: this.h };
+        return !solids.some(s => aabb(tr, s)) &&
+          !otherTanks.some(t => t !== this && t.active && aabb(tr, t.rect()));
+      });
+      this.currentDir = dirs.length > 0 ? dirs[Math.floor(Math.random() * dirs.length)] : randDir();
     }
 
-    const vec = dirToVec(this.currentDir);
+    const newVec = dirToVec(this.currentDir);
     this.dir = this.currentDir;
-    const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers];
-    this.move(vec.dx * this.speed, vec.dy * this.speed, solids, otherTanks);
+    this.move(newVec.dx * this.speed, newVec.dy * this.speed, solids, otherTanks);
 
     // 随机射击
     if (Math.random() < 0.02) {
-      return this.shoot(1); // 敌人子弹穿透力为1
+      return this.shoot(1);
     }
     return null;
   }
@@ -502,6 +810,7 @@ class GameMap {
     this.steels = [];
     this.grass = [];
     this.rivers = [];
+    this.ices = [];  // 雪地瓦片
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const type = this.data[r][c];
@@ -511,6 +820,7 @@ class GameMap {
         else if (type === T.STEEL) this.steels.push(rect(x, y, TILE, TILE));
         else if (type === T.GRASS) this.grass.push(rect(x, y, TILE, TILE));
         else if (type === T.RIVER) this.rivers.push(rect(x, y, TILE, TILE));
+        else if (type === T.ICE) this.ices.push(rect(x, y, TILE, TILE));
         else if (type === T.BASE) this.base = rect(x, y, TILE, TILE);
       }
     }
@@ -635,6 +945,23 @@ class GameMap {
       ctx.textBaseline = 'middle';
       ctx.fillText('🦅', this.base.x + this.base.w / 2, this.base.y + this.base.h / 2 + 1);
     }
+    // 雪地（冰面纹理）
+    for (const ic of this.ices) {
+      ctx.fillStyle = '#d0e8ff';
+      ctx.fillRect(ic.x, ic.y, ic.w, ic.h);
+      // 冰面裂纹
+      ctx.strokeStyle = '#a8d8ea';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ic.x + ic.w * 0.3, ic.y);
+      ctx.lineTo(ic.x + ic.w * 0.5, ic.y + ic.h * 0.5);
+      ctx.lineTo(ic.x + ic.w * 0.7, ic.y + ic.h);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ic.x, ic.y + ic.h * 0.3);
+      ctx.lineTo(ic.x + ic.w * 0.4, ic.y + ic.h * 0.6);
+      ctx.stroke();
+    }
   }
 }
 
@@ -730,8 +1057,8 @@ class Game {
     this.overlay.classList.add('hidden');
     this.map = new GameMap(this.level);
     const playerPos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
-      minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 12
-    });
+      minCol: 2, maxCol: COLS - 4, minRow: 11, maxRow: 12
+    }, [], this.map.rivers, null);
     this.player = new PlayerTank(playerPos.x, playerPos.y);
     this.enemies = [];
     this.bullets = [];
@@ -742,7 +1069,7 @@ class Game {
   }
 
   /** 在指定区域内找一个安全的生成位置（不在固体瓦片内） */
-  _findSafeSpawn(bricks, steels, options = {}, otherTanks = []) {
+  _findSafeSpawn(bricks, steels, options = {}, otherTanks = [], rivers = [], base = null) {
     const { minCol = 1, maxCol = COLS - 2, minRow = 1, maxRow = ROWS - 2 } = options;
     const tankW = 36; // 坦克宽度
     const tankH = 36; // 坦克高度
@@ -759,6 +1086,12 @@ class Game {
       if (!solid) {
         for (const s of steels) { if (aabb(rect_, s)) { solid = true; break; } }
       }
+      if (!solid && rivers) {
+        for (const r of rivers) { if (aabb(rect_, r)) { solid = true; break; } }
+      }
+      if (!solid && base) {
+        if (aabb(rect_, base)) { solid = true; }
+      }
       // 检测是否与其他坦克重叠
       if (!solid) {
         for (const t of otherTanks) {
@@ -769,10 +1102,24 @@ class Game {
       if (!solid) return { x, y };
       attempts++;
     }
-    // 无法找到安全位置，返回区域中心
+    // 无法找到安全位置，返回区域中心（再次检查）
     const centerC = Math.floor((minCol + maxCol) / 2);
     const centerR = Math.floor((minRow + maxRow) / 2);
-    return { x: centerC * TILE, y: centerR * TILE };
+    const fx = centerC * TILE;
+    const fy = centerR * TILE;
+    const fallbackRect = rect(fx + 2, fy + 2, tankW - 4, tankH - 4);
+    let isSafe = true;
+    for (const b of bricks) { if (aabb(fallbackRect, b)) { isSafe = false; break; } }
+    if (isSafe) {
+      for (const s of steels) { if (aabb(fallbackRect, s)) { isSafe = false; break; } }
+    }
+    if (isSafe && rivers) {
+      for (const r of rivers) { if (aabb(fallbackRect, r)) { isSafe = false; break; } }
+    }
+    if (isSafe && base) {
+      if (aabb(fallbackRect, base)) { isSafe = false; }
+    }
+    return { x: isSafe ? fx : minCol * TILE, y: isSafe ? fy : minRow * TILE };
   }
 
   /** 生成下一波敌人（最多4个） */
@@ -783,8 +1130,21 @@ class Game {
       // 传入所有现有坦克避免重叠
       const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
         minCol: 1, maxCol: COLS - 2, minRow: 0, maxRow: 0
-      }, [this.player, ...this.enemies]);
-      this.enemies.push(new EnemyTank(pos.x, pos.y));
+      }, [this.player, ...this.enemies], this.map.rivers, this.map.base);
+      // 随机生成敌方类型（根据关卡进度增加难度）
+      const types = ['LIGHT', 'LIGHT', 'ARMOR', 'SPEED'];
+      if (this.level >= 2) types.push('HEAVY');
+      const type = types[randInt(0, types.length - 1)];
+      const enemy = new EnemyTank(pos.x, pos.y, type);
+      // 触发复活动画（0.8秒闪烁）
+      enemy.startRespawnAnim(800);
+      // 闪烁红光坦克（第4、11、18辆）
+      const spawnOrder = this.enemiesSpawned + 1;
+      if (spawnOrder === 4 || spawnOrder === 11 || spawnOrder === 18) {
+        enemy.isFlashing = true; // 标记为闪烁坦克
+        enemy.color = '#ff4444'; // 红色外观
+      }
+      this.enemies.push(enemy);
       this.enemiesSpawned++;
     }
   }
@@ -794,8 +1154,21 @@ class Game {
     if (this.enemiesSpawned >= this.enemiesPerLevel) return;
     const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
       minCol: 1, maxCol: COLS - 2, minRow: 0, maxRow: 0
-    }, [this.player, ...this.enemies]);
-    this.enemies.push(new EnemyTank(pos.x, pos.y));
+    }, [this.player, ...this.enemies], this.map.rivers, this.map.base);
+    // 随机生成敌方类型（根据关卡进度增加难度）
+    const types = ['LIGHT', 'LIGHT', 'ARMOR', 'SPEED'];
+    if (this.level >= 2) types.push('HEAVY');
+    const type = types[randInt(0, types.length - 1)];
+    const enemy = new EnemyTank(pos.x, pos.y, type);
+    // 触发复活动画（0.8秒闪烁）
+    enemy.startRespawnAnim(800);
+    // 闪烁红光坦克（第4、11、18辆）
+    const spawnOrder = this.enemiesSpawned + 1;
+    if (spawnOrder === 4 || spawnOrder === 11 || spawnOrder === 18) {
+      enemy.isFlashing = true;
+      enemy.color = '#ff4444';
+    }
+    this.enemies.push(enemy);
     this.enemiesSpawned++;
   }
 
@@ -851,8 +1224,8 @@ class Game {
       this.spawnTimer = 0;
       // 玩家在基地左上方重生
       const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
-        minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 12
-      });
+        minCol: 2, maxCol: COLS - 4, minRow: 11, maxRow: 12
+      }, [], this.map.rivers, null);
       this.player.x = pos.x;
       this.player.y = pos.y;
       this.player.active = true;
@@ -901,12 +1274,19 @@ class Game {
       const hit = this.map.checkBulletHit(b.rect(), b.owner, b.power);
       if (hit) {
         b.active = false;
-        if (hit.type === 'base') {
-          this.explosions.push(new Explosion(hit.x + TILE / 2, hit.y + TILE / 2));
-          this._showOverlay('💀 基地被毁！', '敌方摧毁了老鹰基地', '按回车重新开始', `最终分数: ${this.score}`);
-          return;
+        // 子弹打墙/钢墙：仅销毁子弹，不创建爆炸
+      }
+
+      // 子弹 vs 子弹（双向抵消）
+      for (const other of this.bullets) {
+        if (other === b || !other.active) continue;
+        if (other.owner === b.owner) continue; // 同阵营不抵消
+        if (aabb(b.rect(), other.rect())) {
+          b.active = false;
+          other.active = false;
+          // 子弹对撞：不创建爆炸，让子弹直接消失
+          break;
         }
-        this.explosions.push(new Explosion(b.x + 4, b.y + 4));
       }
 
       // 子弹 vs 坦克
@@ -914,18 +1294,30 @@ class Game {
         for (const e of this.enemies) {
           if (!e.active) continue;
           if (aabb(b.rect(), e.rect())) {
-            e.active = false;
+            // 使用新的 takeDamage 系统
+            e.takeDamage();
             b.active = false;
-            this.score += 100;
-            this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2));
-            // 敌人被击毁后立即补充一个（如果本关还没打完）
-            if (this.enemiesSpawned < this.enemiesPerLevel && !this.isTransitioning) {
-              this._respawnOne();
-            }
-            // 检测是否全部20个敌人都已击毁
-            if (this.enemiesSpawned >= this.enemiesPerLevel &&
-                this.enemies.length === 0) {
-              this._nextLevel();
+            if (!e.active) {
+              this.score += e.scoreValue || 100;
+              // 敌方被击毁时使用大爆炸特效
+              this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2, true));
+              // 闪烁坦克掉落道具
+              if (e.isFlashing) {
+                const kinds = ['STAR', 'HELMET', 'SHOVEL', 'BOMB', 'TIMER', 'LIFE'];
+                this.powerups.push(new PowerUp(e.x, e.y, kinds[randInt(0, kinds.length - 1)]));
+              }
+              // 敌人被击毁后立即补充一个（如果本关还没打完）
+              if (this.enemiesSpawned < this.enemiesPerLevel && !this.isTransitioning) {
+                this._respawnOne();
+              }
+              // 检测是否全部20个敌人都已击毁
+              if (this.enemiesSpawned >= this.enemiesPerLevel &&
+                  this.enemies.length === 0) {
+                this._nextLevel();
+              }
+            } else {
+              // 未击毁但有爆炸效果
+              this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2, false));
             }
           }
         }
@@ -933,7 +1325,7 @@ class Game {
         if (this.player.active && aabb(b.rect(), this.player.rect())) {
           b.active = false;
           this.player.takeDamage();
-          this.explosions.push(new Explosion(b.x + 4, b.y + 4));
+          // 玩家被打中：不创建爆炸
           if (!this.player.active) {
             this._showOverlay('💀 游戏结束', '你的坦克被摧毁了', '按回车重新开始', `最终分数: ${this.score}`);
           }
@@ -947,7 +1339,8 @@ class Game {
       if (this.player.active && aabb(e.rect(), this.player.rect())) {
         this.player.takeDamage();
         e.active = false;
-        this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2));
+        // 相撞也用大爆炸
+        this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2, true));
         if (!this.player.active) {
           this._showOverlay('💀 游戏结束', '坦克相撞，同归于尽！', '按回车重新开始', `最终分数: ${this.score}`);
         }
@@ -994,28 +1387,35 @@ class Game {
         break;
       case 'HELMET':
         this.player.invincible = true;
-        this.player.invincibleTime = 5000; // 5秒无敌
+        this.player.invincibleTime = 10000; // 10秒无敌
         break;
       case 'LIFE':
         this.player.lives = Math.min(this.player.lives + 1, 5);
         break;
       case 'BOMB':
-        // 清屏：销毁所有敌方坦克
         for (const e of this.enemies) {
           if (e.active) {
             e.active = false;
             this.score += 50;
-            this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2));
+            this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2, true));
           }
         }
         break;
-      // SHOVEL 和 TIMER 暂未实现
+      case 'SHOVEL':
+        this.player.shielded = true;
+        this.player.shieldTime = 20000; // 20秒护盾
+        break;
+      case 'TIMER':
+        for (const e of this.enemies) {
+          if (e.active) e.freeze(10000); // 冻结10秒
+        }
+        break;
     }
     // 生成新道具（随机位置）
     if (Math.random() < 0.3) {
       const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
         minCol: 2, maxCol: COLS - 3, minRow: 5, maxRow: 11
-      });
+      }, [], this.map.rivers, this.map.base);
       const kinds = ['STAR', 'HELMET', 'LIFE', 'BOMB'];
       this.powerups.push(new PowerUp(pos.x, pos.y, kinds[Math.floor(Math.random() * kinds.length)]));
     }
