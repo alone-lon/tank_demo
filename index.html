@@ -38,6 +38,23 @@
     </div>
     <!-- Canvas 画布 -->
     <canvas id="gameCanvas" width="520" height="520"></canvas>
+    <!-- 移动端触控面板 -->
+    <div id="touch-controls">
+      <!-- 方向键 -->
+      <div class="dpad">
+        <div class="dpad-empty"></div>
+        <button class="dpad-btn" data-key="ArrowUp">▲</button>
+        <div class="dpad-empty"></div>
+        <button class="dpad-btn" data-key="ArrowLeft">◀</button>
+        <div class="dpad-empty"></div>
+        <button class="dpad-btn" data-key="ArrowRight">▶</button>
+        <div class="dpad-empty"></div>
+        <button class="dpad-btn" data-key="ArrowDown">▼</button>
+        <div class="dpad-empty"></div>
+      </div>
+      <!-- 射击按钮 -->
+      <button class="fire-btn" data-key="Space">射击</button>
+    </div>
     <!-- 覆盖层：开始界面 / 游戏结束 -->
     <div id="overlay" class="overlay">
       <div id="overlay-content" class="overlay-content">
@@ -48,6 +65,6 @@
       </div>
     </div>
   </div>
-  <script src="main.js?v=1.51"></script>
+  <script src="main.js?v=1.64"></script>
 </body>
 </html>

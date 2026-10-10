@@ -130,3 +130,89 @@ body {
   color: #4ade80;
   margin-top: 16px;
 }
+
+/* ==================== 移动端触控按钮 ==================== */
+#touch-controls {
+  display: none;  /* 默认隐藏，JS检测移动端后显示 */
+  width: 100%;
+  max-width: 520px;
+  padding: 12px 0;
+  gap: 20px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 方向键区域 */
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 52px);
+  grid-template-rows: repeat(3, 52px);
+  gap: 4px;
+}
+
+.dpad-btn {
+  width: 52px;
+  height: 52px;
+  background: rgba(255,255,255,0.12);
+  border: 2px solid rgba(255,255,255,0.25);
+  border-radius: 12px;
+  color: #eee;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: background 0.1s;
+}
+
+.dpad-btn:active, .dpad-btn.active {
+  background: rgba(245,197,66,0.4);
+  border-color: #f5c542;
+}
+
+.dpad-empty { visibility: hidden; }
+
+/* 射击按钮 */
+.fire-btn {
+  width: 80px;
+  height: 80px;
+  background: rgba(239,68,68,0.3);
+  border: 2px solid rgba(239,68,68,0.6);
+  border-radius: 50%;
+  color: #f87171;
+  font-size: 16px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: background 0.1s;
+}
+
+.fire-btn:active, .fire-btn.active {
+  background: rgba(239,68,68,0.6);
+  border-color: #ef4444;
+}
+
+/* 手机端显示 */
+@media (max-width: 768px), (pointer: coarse) {
+  #touch-controls {
+    display: flex;
+  }
+  #gameCanvas {
+    width: 100vw;
+    height: auto;
+    max-height: 60vh;
+  }
+  .overlay {
+    width: 100vw;
+    height: 60vh;
+    top: 56px;
+  }
+}

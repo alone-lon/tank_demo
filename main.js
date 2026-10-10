@@ -71,6 +71,19 @@ const ENEMY_TYPES = {
   HEAVY: { name: 'heavy', color: '#90EE90', speed: ENEMY_SPEED, hp: 4, score: 400, fireRate: 2000 },
 };
 
+// AI状态枚举
+const AI_STATE = {
+  PATROL: 'patrol',    // 巡逻：随机移动
+  CHASE: 'CHASE',     // 追击：朝玩家移动
+  SHOOT: 'shoot',      // 射击：朝向玩家开火
+  STUCK: 'stuck',      // 卡住：尝试换方向
+};
+
+// 索敌距离（像素）
+const DETECTION_RANGE = 250;
+// 射击距离
+const SHOOT_RANGE = 200;
+
 // 地形类型
 const T = {
   EMPTY: 0,   // 空地
@@ -97,7 +110,7 @@ const LEVELS = [
     [0,1,1,0,1,1,0,1,1,0,1,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,0,1,1,0,0,0,1,1,0,1,0],
-    [0,1,0,1,1,0,0,0,1,1,0,1,0],
+    [0,1,0,1,1,1,6,1,1,1,0,1,0],
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
   ],
   // Level 2 - 雪地战场
@@ -114,7 +127,7 @@ const LEVELS = [
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,1,0,1,1,0,1,1,0,1,1,0],
     [0,1,1,0,1,1,0,1,1,0,1,1,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,6,0,0,0,0,0,0],
   ],
   // Level 3 - 钢铁堡垒
   [
@@ -130,7 +143,7 @@ const LEVELS = [
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,2,0,0,0,2,0,2,0,0,0,2,0],
     [0,2,0,0,0,2,0,2,0,0,0,2,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,6,0,0,0,0,0,0],
   ],
   // Level 4 - 冰河纵横
   [
@@ -146,7 +159,7 @@ const LEVELS = [
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,5,0,5,0,5,0,5,0,5,0,5,0],
     [0,5,0,5,0,5,0,5,0,5,0,5,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,6,0,0,0,0,0,0],
   ],
   // Level 5 - 混合攻防
   [
@@ -162,8 +175,24 @@ const LEVELS = [
     [0,0,0,0,0,0,0,0,0,0,0,0,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
     [0,1,0,1,0,1,0,1,0,1,0,1,0],
-    [0,0,0,0,0,0,0,0,0,0,0,0,0],
+    [0,0,0,0,0,0,6,0,0,0,0,0,0],
   ],
+];
+
+/** 精英怪类型配置 */
+const ELITE_TYPES = {
+  COMMANDER: { name: 'commander', color: '#ff4444', speed: ENEMY_SPEED * 0.8, hp: 8, score: 1000, fireRate: 800 },
+  BOSS: { name: 'boss', color: '#aa0000', speed: ENEMY_SPEED * 0.5, hp: 20, score: 5000, fireRate: 500 },
+};
+
+/** 奖励选项 */
+const REWARD_OPTIONS = [
+  { type: 'STAR', label: '⚡ 火力升级', desc: '子弹穿透+1' },
+  { type: 'HELMET', label: '🛡️ 无敌10秒', desc: '完全免疫伤害' },
+  { type: 'LIFE', label: '❤️ 额外生命', desc: '+1生命上限' },
+  { type: 'SHIELD', label: '🔰 护盾20秒', desc: '受到伤害减半' },
+  { type: 'BOMB', label: '💣 清屏炸弹', desc: '消灭所有敌人' },
+  { type: 'SPEED', label: '🏃 速度提升', desc: '移动速度+30%' },
 ];
 
 /** 加载指定关卡数据 */
@@ -359,6 +388,37 @@ class Explosion extends Entity {
   }
 }
 
+// ─── 浮动文字 ──────────────────────────────────────────────
+
+class FloatingText {
+  constructor(x, y, text, color = '#f5c542') {
+    this.x = x;
+    this.y = y;
+    this.text = text;
+    this.color = color;
+    this.timer = 0;
+    this.maxTime = 1000; // 1秒
+    this.active = true;
+  }
+
+  update(dt) {
+    this.timer += dt;
+    this.y -= 0.5; // 向上漂浮
+    if (this.timer >= this.maxTime) this.active = false;
+  }
+
+  draw(ctx) {
+    const alpha = Math.max(0, 1 - this.timer / this.maxTime);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = this.color;
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.text, this.x, this.y);
+    ctx.restore();
+  }
+}
+
 // ─── 道具类 ────────────────────────────────────────────────
 
 class PowerUp extends Entity {
@@ -407,6 +467,9 @@ class Tank extends Entity {
     // 复活闪烁动画
     this.respawnAnim = 0;    // 动画计时器
     this.isRespawning = false; // 是否处于复活状态
+    // 血条
+    this.maxHp = 1;
+    this.hp = 1;
   }
 
   /** 开始复活动画 */
@@ -578,6 +641,26 @@ class Tank extends Entity {
     ctx.fillRect(-4, -this.h / 2 - 2, 8, 4);
 
     ctx.restore();
+
+    // 绘制血条（非玩家坦克显示HP）
+    if (this.maxHp > 1) {
+      const barWidth = this.w;
+      const barHeight = 4;
+      const barX = this.x;
+      const barY = this.y - 8;
+      const hpPercent = this.hp / this.maxHp;
+
+      // 背景
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      // HP
+      ctx.fillStyle = hpPercent > 0.5 ? '#4ade80' : hpPercent > 0.25 ? '#f59e0b' : '#ef4444';
+      ctx.fillRect(barX, barY, barWidth * hpPercent, barHeight);
+      // 边框
+      ctx.strokeStyle = '#333';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
+    }
   }
 
   /** 加深颜色（用于阴影侧） */
@@ -603,7 +686,7 @@ class PlayerTank extends Tank {
   constructor(x, y) {
     super(x, y, 'up', '#4ade80');
     this.lives = 3;
-    this.level = 0; // 火力等级 0-3
+    this.fireLevel = 0; // 火力等级 0-3（rename from level to avoid conflict with Game.level）
     this.invincible = false;
     this.invincibleTime = 0;
     this.shielded = false; // 铲子护盾
@@ -672,10 +755,10 @@ class PlayerTank extends Tank {
 
     // 射击（同屏弹数限制：1级1发，3级2发）
     if (keys['Space']) {
-      const maxBullets = this.level >= 2 ? 2 : 1;
+      const maxBullets = this.fireLevel >= 2 ? 2 : 1;
       const playerBullets = this.bullets ? this.bullets.filter(b => b.owner === 'player' && b.active).length : 0;
       if (playerBullets < maxBullets) {
-        return this.shoot(this.level + 1);
+        return this.shoot(this.fireLevel + 1);
       }
     }
     return null;
@@ -693,26 +776,40 @@ class PlayerTank extends Tank {
 
   /** 火力升级 */
   upgrade() {
-    this.level = Math.min(this.level + 1, 3);
+    this.fireLevel = Math.min(this.fireLevel + 1, 3);
   }
 }
 
 // ─── 敌方坦克 ──────────────────────────────────────────────
 
 class EnemyTank extends Tank {
-  constructor(x, y, type = 'LIGHT') {
+  constructor(x, y, type = 'LIGHT', isElite = false) {
     const config = ENEMY_TYPES[type] || ENEMY_TYPES.LIGHT;
     super(x, y, 'down', config.color);
     this.type = type;
     this.speed = config.speed;
     this.hp = config.hp;
+    this.maxHp = config.hp;
     this.scoreValue = config.score;
     this.aiTimer = 0;
     this.aiInterval = 1500; // ms 换方向间隔
     this.currentDir = 'down';
     this.fireRate = config.fireRate;
+    this.state = AI_STATE.PATROL;
+    this.stateTimer = 0;
+    this.stuckCounter = 0;
+    this.lastX = x;
+    this.lastY = y;
     this.frozen = false;
     this.frozenTime = 0;
+    this.isFlashing = isElite; // P4 - 精英怪标记
+
+    // P4 - 精英怪增强属性
+    if (isElite) {
+      this.hp *= 2; // 精英怪HP翻倍
+      this.maxHp = this.hp;
+      this.scoreValue *= 2; // 精英怪分数翻倍
+    }
   }
 
   takeDamage() {
@@ -734,6 +831,154 @@ class EnemyTank extends Tank {
     this.frozenTime = duration;
   }
 
+  /** 计算到目标的曼哈顿距离 */
+  _manhattanDist(targetX, targetY) {
+    return Math.abs(this.x - targetX) + Math.abs(this.y - targetY);
+  }
+
+  /** 获取朝向目标的dx/dy */
+  _dirToTarget(tx, ty) {
+    const dx = tx - this.x;
+    const dy = ty - this.y;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0 ? 'right' : 'left';
+    }
+    return dy > 0 ? 'down' : 'up';
+  }
+
+  /** 测试方向是否可行 */
+  _canMove(dir, solids, otherTanks) {
+    const vec = dirToVec(dir);
+    const nx = this.x + vec.dx * this.speed;
+    const ny = this.y + vec.dy * this.speed;
+    const tx = Math.max(0, Math.min(nx, CW - this.w));
+    const ty = Math.max(0, Math.min(ny, CH - this.h));
+    const tr = { x: tx, y: ty, w: this.w, h: this.h };
+    const hitWall = solids.some(s => aabb(tr, s));
+    const hitTank = otherTanks.some(t => t !== this && t.active && aabb(tr, t.rect()));
+    return !hitWall && !hitTank;
+  }
+
+  /** 获取可行方向列表 */
+  _getValidDirs(solids, otherTanks) {
+    return ['up', 'down', 'left', 'right'].filter(d => this._canMove(d, solids, otherTanks));
+  }
+
+  /** 更新AI状态 */
+  _updateAI(player, gameMap, otherTanks) {
+    const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
+    const distToPlayer = this._manhattanDist(player.x + player.w/2, player.y + player.h/2);
+    const inRange = distToPlayer < DETECTION_RANGE;
+    const canShoot = distToPlayer < SHOOT_RANGE;
+
+    // 更新状态计时器
+    this.stateTimer += 16; // 约60fps
+
+    // 状态机
+    switch (this.state) {
+      case AI_STATE.PATROL:
+        // 检测到玩家则切换追击
+        if (inRange) {
+          this.state = AI_STATE.CHASE;
+          this.stateTimer = 0;
+        }
+        // 随机换向
+        if (this.stateTimer >= this.aiInterval) {
+          this.stateTimer = 0;
+          const patrolDirs = this._getValidDirs(solids, otherTanks);
+          this.currentDir = patrolDirs.length > 0 ? patrolDirs[Math.floor(Math.random() * patrolDirs.length)] : this.currentDir;
+        }
+        break;
+
+      case AI_STATE.CHASE:
+        // 朝玩家移动（优先选择能缩短距离的方向）
+        const targetDir = this._dirToTarget(player.x + player.w/2, player.y + player.h/2);
+        const validDirs = this._getValidDirs(solids, otherTanks);
+
+        // 检查是否在目标方向上
+        const isMovingTowardPlayer = validDirs.includes(targetDir);
+
+        if (isMovingTowardPlayer) {
+          this.currentDir = targetDir;
+          // 如果玩家离开范围，回到巡逻
+          if (!inRange) {
+            this.state = AI_STATE.PATROL;
+            this.stateTimer = 0;
+          }
+        } else {
+          // 当前方向不能接近玩家，选择一个能接近的方向
+          const dirsTowardPlayer = validDirs.filter(d => {
+            const v = dirToVec(d);
+            const nx = this.x + v.dx * this.speed;
+            const ny = this.y + v.dy * this.speed;
+            return Math.abs(nx - player.x) + Math.abs(ny - player.y) < distToPlayer;
+          });
+          if (dirsTowardPlayer.length > 0) {
+            this.currentDir = dirsTowardPlayer[Math.floor(Math.random() * dirsTowardPlayer.length)];
+          } else if (validDirs.length > 0) {
+            // 没有能接近的方向，随机选一个
+            this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
+          }
+        }
+
+        // 进入射击范围则切换射击状态
+        if (canShoot) {
+          this.state = AI_STATE.SHOOT;
+          this.stateTimer = 0;
+        }
+        break;
+
+      case AI_STATE.SHOOT:
+        // 朝向玩家并保持距离
+        this.currentDir = this._dirToTarget(player.x + player.w/2, player.y + player.h/2);
+
+        // 如果玩家太远，退回追击
+        if (!inRange) {
+          this.state = AI_STATE.CHASE;
+          this.stateTimer = 0;
+        }
+        // 如果距离拉远，继续追击
+        else if (distToPlayer > SHOOT_RANGE * 1.2) {
+          this.state = AI_STATE.CHASE;
+          this.stateTimer = 0;
+        }
+        break;
+
+      case AI_STATE.STUCK:
+        // 尝试换方向
+        const stuckDirs = this._getValidDirs(solids, otherTanks);
+        if (stuckDirs.length > 0) {
+          // 优先选择能接近玩家的方向
+          const towardPlayer = stuckDirs.filter(d => {
+            const v = dirToVec(d);
+            const nx = this.x + v.dx * this.speed;
+            const ny = this.y + v.dy * this.speed;
+            return Math.abs(nx - player.x) + Math.abs(ny - player.y) < distToPlayer;
+          });
+          this.currentDir = towardPlayer.length > 0 ?
+            towardPlayer[Math.floor(Math.random() * towardPlayer.length)] :
+            stuckDirs[Math.floor(Math.random() * stuckDirs.length)];
+          this.state = AI_STATE.CHASE;
+          this.stateTimer = 0;
+        }
+        break;
+    }
+
+    // 检测是否卡住（位置没有变化）
+    const moved = Math.abs(this.x - this.lastX) > 0.1 || Math.abs(this.y - this.lastY) > 0.1;
+    if (!moved) {
+      this.stuckCounter++;
+      if (this.stuckCounter > 30) { // 0.5秒没动
+        this.state = AI_STATE.STUCK;
+        this.stateTimer = 0;
+      }
+    } else {
+      this.stuckCounter = 0;
+    }
+    this.lastX = this.x;
+    this.lastY = this.y;
+  }
+
   update(dt, gameMap, otherTanks = []) {
     // 检查是否被冻结
     if (this.frozen) {
@@ -747,43 +992,35 @@ class EnemyTank extends Tank {
     this.aiTimer += dt;
     if (this.bulletCooldown > 0) this.bulletCooldown -= dt;
 
-    // AI换方向：撞墙后优先换方向，否则随机
-    const vec = dirToVec(this.currentDir);
-    const prevX = this.x;
-    const prevY = this.y;
-    const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
-
-    // 先测试当前方向是否会撞墙
-    const testRect = {
-      x: Math.max(0, Math.min(prevX + vec.dx * this.speed, CW - this.w)),
-      y: Math.max(0, Math.min(prevY + vec.dy * this.speed, CH - this.h)),
-      w: this.w, h: this.h
-    };
-    const willHitWall = solids.some(s => aabb(testRect, s)) ||
-      otherTanks.some(t => t !== this && t.active && aabb(testRect, t.rect()));
-
-    if (willHitWall || this.aiTimer >= this.aiInterval) {
-      this.aiTimer = 0;
-      // 优先选择能前进的方向
-      const dirs = ['up', 'down', 'left', 'right'].filter(d => {
-        const v = dirToVec(d);
-        const nx = prevX + v.dx * this.speed;
-        const ny = prevY + v.dy * this.speed;
-        const tx = Math.max(0, Math.min(nx, CW - this.w));
-        const ty = Math.max(0, Math.min(ny, CH - this.h));
-        const tr = { x: tx, y: ty, w: this.w, h: this.h };
-        return !solids.some(s => aabb(tr, s)) &&
-          !otherTanks.some(t => t !== this && t.active && aabb(tr, t.rect()));
-      });
-      this.currentDir = dirs.length > 0 ? dirs[Math.floor(Math.random() * dirs.length)] : randDir();
+    // 更新AI状态
+    if (gameMap && gameMap.player) {
+      this._updateAI(gameMap.player, gameMap, otherTanks);
     }
 
-    const newVec = dirToVec(this.currentDir);
+    // 移动
+    const vec = dirToVec(this.currentDir);
     this.dir = this.currentDir;
-    this.move(newVec.dx * this.speed, newVec.dy * this.speed, solids, otherTanks);
+    const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
+    this.move(vec.dx * this.speed, vec.dy * this.speed, solids, otherTanks);
 
-    // 随机射击
-    if (Math.random() < 0.02) {
+    // 射击逻辑
+    if (gameMap && gameMap.player) {
+      const distToPlayer = this._manhattanDist(
+        gameMap.player.x + gameMap.player.w/2,
+        gameMap.player.y + gameMap.player.h/2
+      );
+      // 在射击范围内或正对玩家时射击
+      if (distToPlayer < SHOOT_RANGE && this.bulletCooldown <= 0) {
+        // 检查是否正对玩家
+        const dirToPlayer = this._dirToTarget(
+          gameMap.player.x + gameMap.player.w/2,
+          gameMap.player.y + gameMap.player.h/2
+        );
+        if (dirToPlayer === this.currentDir || Math.random() < 0.3) {
+          return this.shoot(1);
+        }
+      }
+    } else if (Math.random() < 0.02) {
       return this.shoot(1);
     }
     return null;
@@ -811,7 +1048,13 @@ class GameMap {
     this.grass = [];
     this.rivers = [];
     this.ices = [];  // 雪地瓦片
+    this.base = null;  // 基地
+    console.log('[Map] Parsing level, ROWS=', ROWS, 'COLS=', COLS, 'data.length=', this.data.length);
     for (let r = 0; r < ROWS; r++) {
+      if (!this.data[r]) {
+        console.warn('[Map] WARNING: Row', r, 'is undefined!');
+        continue;
+      }
       for (let c = 0; c < COLS; c++) {
         const type = this.data[r][c];
         const x = c * TILE;
@@ -821,9 +1064,10 @@ class GameMap {
         else if (type === T.GRASS) this.grass.push(rect(x, y, TILE, TILE));
         else if (type === T.RIVER) this.rivers.push(rect(x, y, TILE, TILE));
         else if (type === T.ICE) this.ices.push(rect(x, y, TILE, TILE));
-        else if (type === T.BASE) this.base = rect(x, y, TILE, TILE);
+        else if (type === T.BASE) this.base = rect(x, y, TILE, TILE);  // 解析基地
       }
     }
+    console.log('[Map] Parsed: bricks=', this.bricks.length, 'steels=', this.steels.length, 'base=', !!this.base);
   }
 
   // 碰撞检测用（砖块+钢板+基地）
@@ -969,17 +1213,33 @@ class GameMap {
 
 class Game {
   constructor() {
+    console.log('[Game] Constructor starting...');
     this.canvas = document.getElementById('gameCanvas');
+    console.log('[Game] Canvas element:', this.canvas);
     this.ctx = this.canvas.getContext('2d');
+    console.log(`[Game] Canvas: ${this.canvas ? '存在' : '不存在'}`);
+    console.log(`[Game] Context: ${this.ctx ? '可用' : '不可用'}`);
     this.canvas.width = CW;
     this.canvas.height = CH;
 
-    this.state = 'MENU'; // MENU | PLAYING | GAMEOVER_WIN | GAMEOVER_LOSE
+    this.state = 'MENU'; // MENU | PLAYING | GAMEOVER_WIN | GAMEOVER_LOSE | REWARD_SELECT
     this.score = 0;
     this.level = 0;       // 当前关卡索引
     this.lives = 3;
     this.keys = {};
     this.lastTime = 0;
+
+    // P3 - 成长系统
+    this.rewardLevel = 0;   // 奖励选择关卡（每3关一次）
+    this.weaponPower = 0;   // 武器等级（穿透+1每级）
+    this.maxLives = 3;      // 最大生命值
+    this.speedBonus = 0;    // 速度加成
+    this.isRewardSelecting = false; // 是否在选择奖励界面
+
+    // P5 - 技术优化
+    this.highScore = 0;     // 最高分
+    this.totalWins = 0;     // 总通关次数
+    this._loadProgress();   // 加载存档
 
     // 实体
     this.player = null;
@@ -987,6 +1247,7 @@ class Game {
     this.bullets = [];
     this.explosions = [];
     this.powerups = [];   // 道具数组
+    this.floatingTexts = [];  // 浮动文字数组
     this.map = null;
 
     // UI 元素引用
@@ -1007,20 +1268,141 @@ class Game {
     requestAnimationFrame(this._loop);
   }
 
+  // ── P5 - 存档系统 ────────────────────────────────────────
+  _loadProgress() {
+    try {
+      const data = localStorage.getItem('tank_battle_progress');
+      if (data) {
+        const save = JSON.parse(data);
+        this.highScore = save.highScore || 0;
+        this.totalWins = save.totalWins || 0;
+      }
+    } catch(e) {
+      console.warn('存档加载失败:', e);
+    }
+  }
+
+  _saveProgress() {
+    try {
+      const save = {
+        highScore: Math.max(this.highScore, this.score),
+        totalWins: this.totalWins + (this.state === 'GAMEOVER_WIN' ? 1 : 0),
+      };
+      localStorage.setItem('tank_battle_progress', JSON.stringify(save));
+    } catch(e) {
+      console.warn('存档保存失败:', e);
+    }
+  }
+
+  // ── P3 - 奖励选择系统 ────────────────────────────────────
+  _showRewardSelect() {
+    this.isRewardSelecting = true;
+    this.state = 'REWARD_SELECT';
+    this.titleEl.textContent = '🎁 选择奖励';
+    this.subtitleEl.textContent = `第${this.level}关完成！从下方选一个奖励：`;
+    this.hintEl.textContent = '按 1-6 选择对应奖励';
+    this.hintEl.style.display = 'block';
+    this.scoreElFinal.style.display = 'none';
+    this.overlay.classList.remove('hidden');
+
+    // 随机选3个选项
+    this.rewardOptions = REWARD_OPTIONS.sort(() => Math.random() - 0.5).slice(0, 3);
+  }
+
+  _applyReward(option) {
+    switch(option.type) {
+      case 'STAR':
+        this.weaponPower++;
+        break;
+      case 'HELMET':
+        // 已在道具中处理
+        break;
+      case 'LIFE':
+        this.maxLives = Math.min(this.maxLives + 1, 10);
+        this.lives = Math.min(this.lives + 1, this.maxLives);
+        break;
+      case 'SHIELD':
+        // 已在道具中处理
+        break;
+      case 'BOMB':
+        // 已在道具中处理
+        break;
+      case 'SPEED':
+        this.speedBonus += 0.3;
+        break;
+    }
+    this._continueAfterReward();
+  }
+
+  _continueAfterReward() {
+    this.isRewardSelecting = false;
+    this.overlay.classList.add('hidden');
+    this._startNextLevel();
+  }
+
   _bindInput() {
     window.addEventListener('keydown', e => {
       this.keys[e.code] = true;
       if (e.code === 'Enter') this._handleEnter();
       if (e.code === 'Space') e.preventDefault();
+      // P3 - 奖励选择数字键
+      if (this.isRewardSelecting && e.code >= 'Digit1' && e.code <= 'Digit9') {
+        const num = parseInt(e.code.replace('Digit', ''));
+        this._handleNumberKey(num);
+      }
     });
     window.addEventListener('keyup', e => { this.keys[e.code] = false; });
     this.canvas.addEventListener('click', () => this._handleEnter());
+
+    // ── 移动端触控支持 ─────────────────────────────────────
+    this._bindTouchControls();
+  }
+
+  /** 绑定移动端触控按钮 */
+  _bindTouchControls() {
+    const btns = document.querySelectorAll('#touch-controls [data-key]');
+    btns.forEach(btn => {
+      const code = btn.dataset.key;
+
+      // 触摸按下
+      const onPress = (e) => {
+        e.preventDefault();
+        this.keys[code] = true;
+        btn.classList.add('active');
+        // 射击按钮同时触发开始/回车逻辑
+        if (code === 'Space') this._handleEnter();
+      };
+      // 触摸抬起
+      const onRelease = (e) => {
+        e.preventDefault();
+        this.keys[code] = false;
+        btn.classList.remove('active');
+      };
+
+      btn.addEventListener('touchstart', onPress, { passive: false });
+      btn.addEventListener('touchend', onRelease, { passive: false });
+      btn.addEventListener('touchcancel', onRelease, { passive: false });
+
+      // 兼容鼠标点击测试
+      btn.addEventListener('mousedown', onPress);
+      btn.addEventListener('mouseup', onRelease);
+      btn.addEventListener('mouseleave', onRelease);
+    });
   }
 
   _handleEnter() {
+    // P3 - 奖励选择状态
+    if (this.isRewardSelecting && this.state === 'REWARD_SELECT') {
+      return; // 奖励选择用数字键
+    }
     if (this.state === 'MENU' || this.state === 'GAMEOVER_WIN' || this.state === 'GAMEOVER_LOSE') {
       this._startGame();
     }
+  }
+
+  _handleNumberKey(num) {
+    if (!this.isRewardSelecting || !this.rewardOptions || num < 1 || num > this.rewardOptions.length) return;
+    this._applyReward(this.rewardOptions[num - 1]);
   }
 
   /**
@@ -1028,23 +1410,27 @@ class Game {
    * 玩家出生在安全空位（不卡在墙里）
    */
   _startGame() {
+    console.log('[Game] _startGame called, current state:', this.state);
     this.score = 0;
     this.level = 0;
     this.lives = 3;
+    this.maxLives = 3;
+    this.weaponPower = 0;
+    this.speedBonus = 0;
     this.enemiesPerLevel = 20;
     this.maxOnScreen = 4;
     this.enemiesSpawned = 0;
-    this.isTransitioning = true; // 进入过场动画
+    this.isTransitioning = true;
 
     // 显示开始界面
     this.titleEl.textContent = '🎮 坦克大战';
-    this.subtitleEl.textContent = 'WASD/方向键移动 · 空格射击';
-    this.hintEl.textContent = '按回车开始游戏';
+    this.subtitleEl.textContent = 'WASD/方向键移动 · 空格射击 · 回车开始';
+    this.hintEl.textContent = '按回车开始游戏（手机触屏也可操作）';
     this.hintEl.style.display = 'block';
     this.scoreElFinal.style.display = 'none';
     this.overlay.classList.remove('hidden');
 
-    // 延迟0.5秒后开始游戏（与下一关过场一致）
+    // 延迟0.5秒后开始游戏
     setTimeout(() => {
       this._doStartGame();
     }, 500);
@@ -1052,20 +1438,27 @@ class Game {
 
   /** 实际开始游戏的逻辑 */
   _doStartGame() {
+    console.log('[Game] _doStartGame called, state:', this.state);
     this.state = 'PLAYING';
     this.isTransitioning = false;
+    console.log('[Game] Overlay before hide:', this.overlay.classList.contains('hidden'));
     this.overlay.classList.add('hidden');
+    console.log('[Game] Overlay after hide:', this.overlay.classList.contains('hidden'));
     this.map = new GameMap(this.level);
+    console.log('[Game] Map created, bricks:', this.map.bricks.length, 'steels:', this.map.steels.length, 'base:', !!this.map.base);
     const playerPos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
-      minCol: 2, maxCol: COLS - 4, minRow: 11, maxRow: 12
+      minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 10  // 保护墙上方
     }, [], this.map.rivers, null);
     this.player = new PlayerTank(playerPos.x, playerPos.y);
+    console.log('[Game] Player spawned at:', playerPos, 'active:', this.player.active);
     this.enemies = [];
     this.bullets = [];
     this.explosions = [];
     this.powerups = [];
+    this.floatingTexts = [];
     this._spawnWave();
     this._updateHUD();
+    console.log('[Tank] Game started, player:', this.player, 'map:', this.map);
   }
 
   /** 在指定区域内找一个安全的生成位置（不在固体瓦片内） */
@@ -1158,16 +1551,25 @@ class Game {
     // 随机生成敌方类型（根据关卡进度增加难度）
     const types = ['LIGHT', 'LIGHT', 'ARMOR', 'SPEED'];
     if (this.level >= 2) types.push('HEAVY');
-    const type = types[randInt(0, types.length - 1)];
-    const enemy = new EnemyTank(pos.x, pos.y, type);
-    // 触发复活动画（0.8秒闪烁）
-    enemy.startRespawnAnim(800);
-    // 闪烁红光坦克（第4、11、18辆）
-    const spawnOrder = this.enemiesSpawned + 1;
-    if (spawnOrder === 4 || spawnOrder === 11 || spawnOrder === 18) {
-      enemy.isFlashing = true;
-      enemy.color = '#ff4444';
+
+    // P4 - 精英怪生成（第5关后出现，概率10%）
+    let isElite = false;
+    let type = types[randInt(0, types.length - 1)];
+    if (this.level >= 4 && Math.random() < 0.1) {
+      isElite = true;
+      type = this.level >= 10 ? 'BOSS' : 'COMMANDER';
     }
+
+    const enemy = new EnemyTank(pos.x, pos.y, type, isElite);
+    enemy.startRespawnAnim(800);
+
+    // 精英怪特殊标记
+    if (isElite) {
+      enemy.isFlashing = true;
+      enemy.color = ELITE_TYPES[type]?.color || '#ff4444';
+      this.floatingTexts.push(new FloatingText(enemy.x + enemy.w/2, enemy.y - 10, '⚠️精英!', '#ff4444'));
+    }
+
     this.enemies.push(enemy);
     this.enemiesSpawned++;
   }
@@ -1175,8 +1577,8 @@ class Game {
   /** 更新HUD显示 */
   _updateHUD() {
     this.scoreEl.textContent = this.score;
-    this.livesEl.textContent = '♥'.repeat(Math.max(0, this.player?.lives || 0));
-    this.livesEl.className = 'hud-value ' + (this.player?.lives > 1 ? 'lives-green' : 'lives-red');
+    this.livesEl.textContent = this.player ? '♥'.repeat(Math.max(0, this.player.lives)) : '♥♥♥';
+    this.livesEl.className = 'hud-value ' + (this.player && this.player.lives > 1 ? 'lives-green' : 'lives-red');
     this.enemiesEl.textContent = this.enemies.filter(e => e.active).length + '/' + this.maxOnScreen;
     this.waveEl.textContent = '波 ' + Math.ceil(this.enemiesSpawned / 4);
     this.levelEl.textContent = '关卡 ' + (this.level + 1);
@@ -1197,13 +1599,21 @@ class Game {
       this.scoreElFinal.style.display = 'none';
     }
     this.overlay.classList.remove('hidden');
+    // P5 - 保存存档
+    this._saveProgress();
+  }
+  _nextLevel() {
+    // P3 - 每3关显示奖励选择
+    if ((this.level + 1) % 3 === 0 && this.level > 0) {
+      this._showRewardSelect();
+      return;
+    }
+    this._startNextLevel();
   }
 
-  /** 进入下一关（带过场动画） */
-  _nextLevel() {
-    this.level++;
-    this.isTransitioning = true; // 暂停游戏逻辑
-    // 显示关卡完成提示
+  /** 开始下一关 */
+  _startNextLevel() {
+    this.isTransitioning = true;
     this.titleEl.textContent = '🎉 关卡 ' + this.level + ' 完成！';
     this.subtitleEl.textContent = '准备进入下一关...';
     this.hintEl.textContent = '';
@@ -1211,26 +1621,29 @@ class Game {
     this.scoreElFinal.style.display = 'none';
     this.overlay.classList.remove('hidden');
 
-    // 0.5秒后切换关卡
     setTimeout(() => {
       this.overlay.classList.add('hidden');
-      this.isTransitioning = false; // 恢复游戏逻辑
+      this.isTransitioning = false;
+      this.level++;
       this.map = new GameMap(this.level % LEVELS.length);
       this.enemies = [];
       this.bullets = [];
       this.explosions = [];
       this.powerups = [];
+      this.floatingTexts = [];
       this.enemiesSpawned = 0;
       this.spawnTimer = 0;
-      // 玩家在基地左上方重生
       const pos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
-        minCol: 2, maxCol: COLS - 4, minRow: 11, maxRow: 12
+        minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 10  // 保护墙上方
       }, [], this.map.rivers, null);
       this.player.x = pos.x;
       this.player.y = pos.y;
       this.player.active = true;
-      this.player.lives = Math.min(this.player.lives + 1, 5); // 每关加1命，最多5
-      this._spawnWave(); // 生成第一批敌人
+      // 应用速度加成
+      if (this.speedBonus > 0) {
+        this.player.speed = PLAYER_SPEED * (1 + this.speedBonus);
+      }
+      this._spawnWave();
       this._updateHUD();
     }, 500);
   }
@@ -1240,15 +1653,23 @@ class Game {
     const dt = timestamp - this.lastTime;
     this.lastTime = timestamp;
 
+    // 绘制每一帧（包括MENU和PLAYING状态）
+    this._draw();
+
+    // 只有在 PLAYING 状态下才更新逻辑
     if (this.state === 'PLAYING') {
       this._update(dt);
     }
-    this._draw();
     requestAnimationFrame(this._loop);
   }
 
   _update(dt) {
     // 更新玩家（传入其他坦克，排除自己）
+    if (!this.player || !this.player.active) {
+      console.log(`[Update] Player null or inactive, state=${this.state}`);
+      return;
+    }
+
     const pBullet = this.player.update(this.keys, this.map, [
       ...this.enemies.filter(e => e.active && e !== this.player)
     ]);
@@ -1275,6 +1696,11 @@ class Game {
       if (hit) {
         b.active = false;
         // 子弹打墙/钢墙：仅销毁子弹，不创建爆炸
+        // 基地被击中则游戏结束
+        if (hit.type === 'base') {
+          this._showOverlay('💀 基地被毁！', '敌方摧毁了老鹰基地', '按回车重新开始', `最终分数: ${this.score}`);
+          return; // 立即结束当前帧
+        }
       }
 
       // 子弹 vs 子弹（双向抵消）
@@ -1336,7 +1762,7 @@ class Game {
     // 敌方碰撞玩家
     for (const e of this.enemies) {
       if (!e.active) continue;
-      if (this.player.active && aabb(e.rect(), this.player.rect())) {
+      if (this.player && this.player.active && aabb(e.rect(), this.player.rect())) {
         this.player.takeDamage();
         e.active = false;
         // 相撞也用大爆炸
@@ -1347,10 +1773,18 @@ class Game {
       }
     }
 
+    // 更新浮动文字
+    if (this.floatingTexts) {
+      this.floatingTexts = this.floatingTexts.filter(ft => {
+        ft.update(dt);
+        return ft.active;
+      });
+    }
+
     // 道具拾取检测
     for (const p of this.powerups) {
       if (!p.active) continue;
-      if (this.player.active && aabb(this.player.rect(), p.rect())) {
+      if (this.player && this.player.active && aabb(this.player.rect(), p.rect())) {
         p.active = false;
         this._applyPowerup(p.kind);
       }
@@ -1361,6 +1795,7 @@ class Game {
     this.enemies = this.enemies.filter(e => e.active);
     this.explosions = this.explosions.filter(e => { e.update(dt); return e.active; });
     this.powerups = this.powerups.filter(p => p.active);
+    this.floatingTexts = this.floatingTexts.filter(ft => ft.active);
 
     // 自动刷新生成（同屏少于4个且未发完所有敌人，且不在过场中）
     // 注：现在改为"死一个补一个"模式，此定时器仅处理初始波次生成
@@ -1384,13 +1819,16 @@ class Game {
     switch (kind) {
       case 'STAR':
         this.player.upgrade();
+        this.floatingTexts.push(new FloatingText(this.player.x + this.player.w/2, this.player.y - 10, '火力升级!', '#f5c542'));
         break;
       case 'HELMET':
         this.player.invincible = true;
         this.player.invincibleTime = 10000; // 10秒无敌
+        this.floatingTexts.push(new FloatingText(this.player.x + this.player.w/2, this.player.y - 10, '无敌10秒!', '#60a5fa'));
         break;
       case 'LIFE':
-        this.player.lives = Math.min(this.player.lives + 1, 5);
+        this.player.lives = Math.min(this.player.lives + 1, this.maxLives);
+        this.floatingTexts.push(new FloatingText(this.player.x + this.player.w/2, this.player.y - 10, '+1生命', '#ef4444'));
         break;
       case 'BOMB':
         for (const e of this.enemies) {
@@ -1400,15 +1838,18 @@ class Game {
             this.explosions.push(new Explosion(e.x + e.w / 2, e.y + e.h / 2, true));
           }
         }
+        this.floatingTexts.push(new FloatingText(this.player.x + this.player.w/2, this.player.y - 10, '清屏!', '#f59e0b'));
         break;
       case 'SHOVEL':
         this.player.shielded = true;
         this.player.shieldTime = 20000; // 20秒护盾
+        this.floatingTexts.push(new FloatingText(this.player.x + this.player.w/2, this.player.y - 10, '护盾20秒', '#a78bfa'));
         break;
       case 'TIMER':
         for (const e of this.enemies) {
           if (e.active) e.freeze(10000); // 冻结10秒
         }
+        this.floatingTexts.push(new FloatingText(this.player.x + this.player.w/2, this.player.y - 10, '冻结敌人!', '#38bdf8'));
         break;
     }
     // 生成新道具（随机位置）
@@ -1423,33 +1864,111 @@ class Game {
 
   _draw() {
     const ctx = this.ctx;
+    console.log(`[Draw] ctx=${!!ctx}, map=${!!this.map}, player=${!!this.player}, state=${this.state}`);
+    if (!ctx) {
+      console.error('Canvas context is null!');
+      return;
+    }
+
     // 清屏
     ctx.fillStyle = '#0a0a14';
     ctx.fillRect(0, 0, CW, CH);
+    console.log(`[Draw] map.bricks=${this.map?.bricks?.length}, map.base=${!!this.map?.base}, player.pos=${this.player?.x},${this.player?.y}`);
 
     // 绘制地图
     if (this.map) this.map.draw(ctx);
 
     // 绘制实体（草丛在后面，先画）
-    if (this.player?.active) this.player.draw(ctx);
+    if (this.player && this.player.active) this.player.draw(ctx);
     for (const e of this.enemies) {
-      if (e.active) e.draw(ctx);
+      if (e && e.active) e.draw(ctx);
     }
     for (const b of this.bullets) {
-      if (b.active) b.draw(ctx);
+      if (b && b.active) b.draw(ctx);
     }
     for (const p of this.powerups) {
-      if (p.active) p.draw(ctx);
+      if (p && p.active) p.draw(ctx);
     }
     for (const ex of this.explosions) {
-      if (ex.active) ex.draw(ctx);
+      if (ex && ex.active) ex.draw(ctx);
     }
-    // 草丛在最上层（遮挡）
+    for (const ft of (this.floatingTexts || [])) {
+      if (ft && ft.active) ft.draw(ctx);
+    }
     if (this.map) this.map.drawGrass(ctx);
+
+    // P3 - 奖励选择界面渲染
+    if (this.isRewardSelecting && this.rewardOptions) {
+      this._drawRewardSelect(ctx);
+    }
+  }
+
+  /** 绘制奖励选择界面 */
+  _drawRewardSelect(ctx) {
+    const cx = CW / 2;
+    const cy = CH / 2;
+
+    // 半透明背景
+    ctx.fillStyle = 'rgba(0,0,0,0.85)';
+    ctx.fillRect(0, 0, CW, CH);
+
+    // 标题
+    ctx.fillStyle = '#f5c542';
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎁 选择奖励', cx, cy - 120);
+
+    // 副标题
+    ctx.fillStyle = '#ccc';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('每3关可获得一次奖励选择', cx, cy - 85);
+
+    // 选项卡片
+    const cardWidth = 150;
+    const cardHeight = 100;
+    const gap = 20;
+    const totalWidth = this.rewardOptions.length * (cardWidth + gap) - gap;
+    let startX = cx - totalWidth / 2;
+
+    this.rewardOptions.forEach((opt, i) => {
+      const cardX = startX + i * (cardWidth + gap);
+      const cardY = cy - 40;
+
+      // 卡片背景（用rect代替roundRect以兼容旧浏览器）
+      ctx.fillStyle = i === 0 ? '#1a1a2e' : '#16213e';
+      ctx.strokeStyle = '#f5c542';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.rect(cardX, cardY, cardWidth, cardHeight);
+      ctx.fill();
+      ctx.stroke();
+
+      // 编号
+      ctx.fillStyle = '#f5c542';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText(`${i + 1}`, cardX + cardWidth/2, cardY + 30);
+
+      // 图标
+      const icons = { STAR: '⭐', HELMET: '🛡️', LIFE: '❤️', SHIELD: '🔰', BOMB: '💣', SPEED: '🏃' };
+      ctx.font = '24px sans-serif';
+      ctx.fillText(icons[opt.type] || '?', cardX + cardWidth/2, cardY + 60);
+
+      // 描述
+      ctx.fillStyle = '#aaa';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(opt.label, cardX + cardWidth/2, cardY + 85);
+    });
+
+    // 提示
+    ctx.fillStyle = '#888';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('按数字键 1-' + this.rewardOptions.length + ' 选择', cx, cy + 80);
   }
 }
 
 // ─── 启动游戏 ──────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+  console.log('[Tank] DOMContentLoaded fired');
   window.game = new Game();
+  console.log('[Tank] Game instance created:', window.game);
 });
