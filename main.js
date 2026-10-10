@@ -872,9 +872,16 @@ class EnemyTank extends Tank {
     const canShoot = distToPlayer < SHOOT_RANGE;
 
     // 更新状态计时器
-    this.stateTimer += 16; // 约60fps
+    this.stateTimer += 16;
 
-    // 状态机
+    // 计算相对位置
+    const playerCX = player.x + player.w/2;
+    const playerCY = player.y + player.h/2;
+    const myCX = this.x + this.w/2;
+    const myCY = this.y + this.h/2;
+    const dx = playerCX - myCX;
+    const dy = playerCY - myCY;
+
     switch (this.state) {
       case AI_STATE.PATROL:
         // 检测到玩家则切换追击
@@ -882,17 +889,20 @@ class EnemyTank extends Tank {
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
-        // 随机换向（包括向下朝玩家方向）
+        // 巡逻时更多样化：有时横向移动包抄
         if (this.stateTimer >= this.aiInterval) {
           this.stateTimer = 0;
           const patrolDirs = this._getValidDirs(solids, otherTanks);
-          // 巡逻时有一定概率朝玩家方向移动
           if (patrolDirs.length > 0) {
-            const dirToPlayer = this._dirToTarget(player.x + player.w/2, player.y + player.h/2);
-            // 70%概率朝玩家移动，30%随机
-            if (patrolDirs.includes(dirToPlayer) && Math.random() < 0.7) {
-              this.currentDir = dirToPlayer;
+            // 根据相对位置决定策略
+            if (Math.abs(dx) > Math.abs(dy)) {
+              // 玩家在水平方向，优先左右移动
+              const sideDirs = patrolDirs.filter(d => d === 'left' || d === 'right');
+              this.currentDir = sideDirs.length > 0 && Math.random() < 0.8
+                ? sideDirs[Math.floor(Math.random() * sideDirs.length)]
+                : patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
             } else {
+              // 玩家在下放，有一定概率横向移动
               this.currentDir = patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
             }
           }
@@ -900,32 +910,44 @@ class EnemyTank extends Tank {
         break;
 
       case AI_STATE.CHASE:
-        // 朝玩家移动（优先选择能缩短距离的方向）
-        const targetDir = this._dirToTarget(player.x + player.w/2, player.y + player.h/2);
         const validDirs = this._getValidDirs(solids, otherTanks);
+        if (validDirs.length === 0) break;
 
-        // 检查是否在目标方向上
-        const isMovingTowardPlayer = validDirs.includes(targetDir);
+        // 计算理想位置：保持适当距离，不要直接撞到玩家
+        const idealDist = SHOOT_RANGE * 0.8;
+        const shouldRetreat = distToPlayer < idealDist * 0.5;
+        const shouldApproach = distToPlayer > idealDist * 1.5;
 
-        if (isMovingTowardPlayer) {
-          this.currentDir = targetDir;
-          // 如果玩家离开范围，回到巡逻
-          if (!inRange) {
-            this.state = AI_STATE.PATROL;
-            this.stateTimer = 0;
-          }
-        } else {
-          // 当前方向不能接近玩家，选择一个能接近的方向
-          const dirsTowardPlayer = validDirs.filter(d => {
+        if (shouldRetreat) {
+          // 后退：选择远离玩家的方向
+          const retreatDirs = validDirs.filter(d => {
             const v = dirToVec(d);
-            const nx = this.x + v.dx * this.speed;
-            const ny = this.y + v.dy * this.speed;
-            return Math.abs(nx - player.x) + Math.abs(ny - player.y) < distToPlayer;
+            const nx = myCX + v.dx * 40;
+            const ny = myCY + v.dy * 40;
+            return Math.hypot(nx - playerCX, ny - playerCY) > distToPlayer;
           });
-          if (dirsTowardPlayer.length > 0) {
-            this.currentDir = dirsTowardPlayer[Math.floor(Math.random() * dirsTowardPlayer.length)];
-          } else if (validDirs.length > 0) {
-            // 没有能接近的方向，随机选一个
+          this.currentDir = retreatDirs.length > 0
+            ? retreatDirs[Math.floor(Math.random() * retreatDirs.length)]
+            : validDirs[Math.floor(Math.random() * validDirs.length)];
+        } else if (shouldApproach) {
+          // 接近：选择朝向玩家的方向
+          const approachDirs = validDirs.filter(d => {
+            const v = dirToVec(d);
+            const nx = myCX + v.dx * 40;
+            const ny = myCY + v.dy * 40;
+            return Math.hypot(nx - playerCX, ny - playerCY) < distToPlayer;
+          });
+          this.currentDir = approachDirs.length > 0
+            ? approachDirs[Math.floor(Math.random() * approachDirs.length)]
+            : validDirs[Math.floor(Math.random() * validDirs.length)];
+        } else {
+          // 保持距离：侧向移动寻找射击角度
+          if (Math.random() < 0.4 && Math.abs(dx) > Math.abs(dy)) {
+            // 玩家在水平方向，横向移动
+            const sideDirs = validDirs.filter(d => d === (dx > 0 ? 'right' : 'left'));
+            this.currentDir = sideDirs.length > 0 ? sideDirs[0] : validDirs[Math.floor(Math.random() * validDirs.length)];
+          } else {
+            // 随机选择一个方向
             this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
           }
         }
@@ -938,46 +960,39 @@ class EnemyTank extends Tank {
         break;
 
       case AI_STATE.SHOOT:
-        // 朝向玩家并保持距离
-        this.currentDir = this._dirToTarget(player.x + player.w/2, player.y + player.h/2);
+        // 射击时保持位置或侧移，不要直线冲锋
+        const shootDirs = validDirs.filter(d => {
+          const v = dirToVec(d);
+          // 优先侧向移动
+          return d === 'left' || d === 'right';
+        });
+        this.currentDir = shootDirs.length > 0 && Math.random() < 0.7
+          ? shootDirs[Math.floor(Math.random() * shootDirs.length)]
+          : validDirs[Math.floor(Math.random() * validDirs.length)];
 
         // 如果玩家太远，退回追击
         if (!inRange) {
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
-        // 如果距离拉远，继续追击
-        else if (distToPlayer > SHOOT_RANGE * 1.2) {
-          this.state = AI_STATE.CHASE;
-          this.stateTimer = 0;
-        }
         break;
 
       case AI_STATE.STUCK:
-        // 尝试换方向
         const stuckDirs = this._getValidDirs(solids, otherTanks);
         if (stuckDirs.length > 0) {
-          // 优先选择能接近玩家的方向
-          const towardPlayer = stuckDirs.filter(d => {
-            const v = dirToVec(d);
-            const nx = this.x + v.dx * this.speed;
-            const ny = this.y + v.dy * this.speed;
-            return Math.abs(nx - player.x) + Math.abs(ny - player.y) < distToPlayer;
-          });
-          this.currentDir = towardPlayer.length > 0 ?
-            towardPlayer[Math.floor(Math.random() * towardPlayer.length)] :
-            stuckDirs[Math.floor(Math.random() * stuckDirs.length)];
+          // 优先选择远离当前位置的方向
+          this.currentDir = stuckDirs[Math.floor(Math.random() * stuckDirs.length)];
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
         break;
     }
 
-    // 检测是否卡住（位置没有变化）
+    // 检测是否卡住
     const moved = Math.abs(this.x - this.lastX) > 0.1 || Math.abs(this.y - this.lastY) > 0.1;
     if (!moved) {
       this.stuckCounter++;
-      if (this.stuckCounter > 30) { // 0.5秒没动
+      if (this.stuckCounter > 30) {
         this.state = AI_STATE.STUCK;
         this.stateTimer = 0;
       }
