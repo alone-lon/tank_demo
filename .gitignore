@@ -1,0 +1,2 @@
+# 忽略 Windows/null 设备文件
+nul
