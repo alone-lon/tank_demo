@@ -1243,16 +1243,31 @@ class EnemyTank extends Tank {
             ? retreatDirs[Math.floor(Math.random() * retreatDirs.length)]
             : validDirs[Math.floor(Math.random() * validDirs.length)];
         } else if (shouldApproach) {
-          // 接近：优先选择能缩短距离的方向，包括横向包抄
+          // 接近：优先选择能缩短距离的方向
           const approachDirs = validDirs.filter(d => {
             const v = dirToVec(d);
             const nx = myCX + v.dx * 40;
             const ny = myCY + v.dy * 40;
             return Math.hypot(nx - playerCX, ny - playerCY) < distToPlayer;
           });
-          this.currentDir = approachDirs.length > 0
-            ? approachDirs[Math.floor(Math.random() * approachDirs.length)]
-            : validDirs[Math.floor(Math.random() * validDirs.length)];
+
+          // 关键修复：不要只向下冲，尝试横向包抄
+          if (approachDirs.length > 0) {
+            // 有能缩短距离的方向
+            const verticalDirs = approachDirs.filter(d => d === 'down');
+            const horizontalDirs = approachDirs.filter(d => d === 'left' || d === 'right');
+
+            if (horizontalDirs.length > 0 && Math.random() < 0.4) {
+              // 40%概率选择横向包抄
+              this.currentDir = horizontalDirs[Math.floor(Math.random() * horizontalDirs.length)];
+            } else {
+              // 否则继续接近（包括向下）
+              this.currentDir = approachDirs[Math.floor(Math.random() * approachDirs.length)];
+            }
+          } else {
+            // 没有能缩短距离的方向，随机选一个
+            this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
+          }
         } else {
           // 保持距离：根据相对位置选择移动策略
           if (Math.abs(dx) > Math.abs(dy) * 1.5) {
@@ -1761,8 +1776,8 @@ class Game {
     if (this.isRewardSelecting && this.state === 'REWARD_SELECT') {
       return; // 奖励选择用数字键
     }
+    if (this.isTransitioning) return; // 过场动画中禁止重复触发
     if (this.state === 'MENU' || this.state === 'GAMEOVER_WIN' || this.state === 'GAMEOVER_LOSE') {
-      // 清除之前的调试日志
       console.log('[Game] 开始游戏，调试日志已启用');
       this._startGame();
     }
