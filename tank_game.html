@@ -210,7 +210,7 @@ body {
 /* 手机端显示 */
 @media (max-width: 768px), (pointer: coarse) {
   #touch-controls {
-    display: flex;
+    display: flex !important;
   }
   #gameCanvas {
     width: 100vw;
@@ -1710,7 +1710,21 @@ class Game {
 
   /** 绑定移动端触控按钮 */
   _bindTouchControls() {
+    // 检测是否为触控设备
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth <= 768;
+
+    // 强制显示触控面板（方便测试）
+    const touchControls = document.getElementById('touch-controls');
+    if (isTouchDevice) {
+      touchControls.style.display = 'flex';
+      console.log('[Game] 检测到触控设备，显示虚拟按键');
+    } else {
+      // 添加一个测试按钮，方便PC上测试触控
+      console.log('[Game] 非触控设备，可用鼠标点击按钮测试');
+    }
+
     const btns = document.querySelectorAll('#touch-controls [data-key]');
+    console.log(`[Game] 找到 ${btns.length} 个触控按钮`);
     btns.forEach(btn => {
       const code = btn.dataset.key;
 
@@ -1719,6 +1733,7 @@ class Game {
         e.preventDefault();
         this.keys[code] = true;
         btn.classList.add('active');
+        console.log(`[Touch] ${code} pressed, keys=${Object.keys(this.keys).join(',')}`);
         // 射击按钮同时触发开始/回车逻辑
         if (code === 'Space') this._handleEnter();
       };
@@ -1727,6 +1742,7 @@ class Game {
         e.preventDefault();
         this.keys[code] = false;
         btn.classList.remove('active');
+        console.log(`[Touch] ${code} released`);
       };
 
       btn.addEventListener('touchstart', onPress, { passive: false });
