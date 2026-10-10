@@ -1092,11 +1092,11 @@ class EnemyTank extends Tank {
     this.maxHp = config.hp;
     this.scoreValue = config.score;
     this.aiTimer = 0;
-    this.aiInterval = 1500; // ms 换方向间隔
-    this.currentDir = 'down';
+    this.aiInterval = 700; // ms 换方向间隔（缩短，避免开局长时间单向冲锋）
+    this.currentDir = ['down', 'left', 'right'][Math.floor(Math.random() * 3)]; // 初始方向随机，避免集体向下冲锋
     this.fireRate = config.fireRate;
     this.state = AI_STATE.PATROL;
-    this.stateTimer = 0;
+    this.stateTimer = this.aiInterval; // 立即触发首次方向决策
     this.stuckCounter = 0;
     this.lastX = x;
     this.lastY = y;
@@ -1164,178 +1164,183 @@ class EnemyTank extends Tank {
     return ['up', 'down', 'left', 'right'].filter(d => this._canMove(d, solids, otherTanks));
   }
 
+  /** 在候选方向中选出最接近目标的方向（欧氏距离最小） */
+  _closestDir(candidates, targetX, targetY) {
+    if (candidates.length === 0) return null;
+    let best = candidates[0];
+    let bestDist = Infinity;
+    for (const d of candidates) {
+      const v = dirToVec(d);
+      const nx = this.x + this.w / 2 + v.dx * TILE;
+      const ny = this.y + this.h / 2 + v.dy * TILE;
+      const dist = Math.hypot(nx - targetX, ny - targetY);
+      if (dist < bestDist) { bestDist = dist; best = d; }
+    }
+    return best;
+  }
+
+  /** 在候选方向中选出最远离目标的方向（用于后退拉开距离） */
+  _farthestDir(candidates, targetX, targetY) {
+    if (candidates.length === 0) return null;
+    let best = candidates[0];
+    let bestDist = -Infinity;
+    for (const d of candidates) {
+      const v = dirToVec(d);
+      const nx = this.x + this.w / 2 + v.dx * TILE;
+      const ny = this.y + this.h / 2 + v.dy * TILE;
+      const dist = Math.hypot(nx - targetX, ny - targetY);
+      if (dist > bestDist) { bestDist = dist; best = d; }
+    }
+    return best;
+  }
+
+  /**
+   * 绕墙寻路核心：当理想方向被墙挡时，沿垂直方向找"最快能重新走理想方向"的通道口。
+   * 解决坦克卡在墙前无法对齐通道、原地横跳下不去的问题。
+   */
+  _flankTowardOpen(solids, otherTanks, idealDir) {
+    const perpDirs = (idealDir === 'up' || idealDir === 'down') ? ['left', 'right'] : ['up', 'down'];
+    let bestDir = null;
+    let bestDist = Infinity;
+    for (const pd of perpDirs) {
+      const v = dirToVec(pd);
+      // 沿 pd 方向扫描（最多 2 格 = 80px），找 idealDir 变可行的通道位置
+      for (let dist = this.speed; dist <= TILE * 2; dist += Math.max(this.speed, 2)) {
+        const testX = this.x + v.dx * dist;
+        const testY = this.y + v.dy * dist;
+        // 横向中途位置本身必须可达
+        const selfTr = { x: testX, y: testY, w: this.w, h: this.h };
+        const selfBlocked = solids.some(s => aabb(selfTr, s))
+          || otherTanks.some(t => t !== this && t.active && aabb(selfTr, t.rect()));
+        if (selfBlocked) break; // 这条横向路走不通
+        // 从该位置能否沿 idealDir 走一步（即找到通道口）
+        const iv = dirToVec(idealDir);
+        const nx = testX + iv.dx * this.speed;
+        const ny = testY + iv.dy * this.speed;
+        const tx = Math.max(0, Math.min(nx, CW - this.w));
+        const ty = Math.max(0, Math.min(ny, CH - this.h));
+        const tr = { x: tx, y: ty, w: this.w, h: this.h };
+        const blocked = solids.some(s => aabb(tr, s))
+          || otherTanks.some(t => t !== this && t.active && aabb(tr, t.rect()));
+        if (!blocked) {
+          if (dist < bestDist) { bestDist = dist; bestDir = pd; }
+          break;
+        }
+      }
+    }
+    return bestDir;
+  }
+
+  /** 朝玩家推进：畅通直进，被墙挡则绕通道口，兜底选最靠近玩家的方向 */
+  _approachPlayer(validDirs, solids, otherTanks, playerCX, playerCY) {
+    const idealDir = this._dirToTarget(playerCX, playerCY);
+    if (validDirs.includes(idealDir)) return idealDir; // 畅通 → 直进
+    const flank = this._flankTowardOpen(solids, otherTanks, idealDir); // 绕向通道口
+    if (flank && validDirs.includes(flank)) return flank;
+    return this._closestDir(validDirs, playerCX, playerCY); // 兜底
+  }
+
   /** 更新AI状态 */
   _updateAI(player, gameMap, otherTanks) {
     const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
-    const distToPlayer = this._manhattanDist(player.x + player.w/2, player.y + player.h/2);
+
+    // 相对位置（统一欧氏距离，与方向评估一致）
+    const playerCX = player.x + player.w / 2;
+    const playerCY = player.y + player.h / 2;
+    const myCX = this.x + this.w / 2;
+    const myCY = this.y + this.h / 2;
+    const distToPlayer = Math.hypot(playerCX - myCX, playerCY - myCY);
     const inRange = distToPlayer < DETECTION_RANGE;
     const canShoot = distToPlayer < SHOOT_RANGE;
 
-    // 更新状态计时器
     this.stateTimer += 16;
 
-    // 计算相对位置
-    const playerCX = player.x + player.w/2;
-    const playerCY = player.y + player.h/2;
-    const myCX = this.x + this.w/2;
-    const myCY = this.y + this.h/2;
-    const dx = playerCX - myCX;
-    const dy = playerCY - myCY;
-
-    // 获取当前可行方向
-    const currentValidDirs = this._getValidDirs(solids, otherTanks);
-
-    // 调试：每帧打印敌人位置和可行方向
-    if (Math.random() < 0.1) {
-    }
-
     switch (this.state) {
-      case AI_STATE.PATROL:
-        // 检测到玩家则切换追击
+      case AI_STATE.PATROL: {
         if (inRange) {
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
-        // 巡逻时更多样化：有时横向移动包抄
         if (this.stateTimer >= this.aiInterval) {
           this.stateTimer = 0;
           const patrolDirs = this._getValidDirs(solids, otherTanks);
           if (patrolDirs.length > 0) {
-            // 根据相对位置决定策略
-            if (Math.abs(dx) > Math.abs(dy)) {
-              // 玩家在水平方向，优先左右移动
-              const sideDirs = patrolDirs.filter(d => d === 'left' || d === 'right');
-              this.currentDir = sideDirs.length > 0 && Math.random() < 0.8
-                ? sideDirs[Math.floor(Math.random() * sideDirs.length)]
-                : patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
-            } else {
-              // 玩家在下放，有一定概率横向移动
-              this.currentDir = patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
-            }
+            // 朝玩家推进（含绕通道），少量随机让路径多样化、避免全员同路径
+            this.currentDir = Math.random() < 0.8
+              ? this._approachPlayer(patrolDirs, solids, otherTanks, playerCX, playerCY)
+              : patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
           }
         }
         break;
+      }
 
-      case AI_STATE.CHASE:
+      case AI_STATE.CHASE: {
         const validDirs = this._getValidDirs(solids, otherTanks);
         if (validDirs.length === 0) break;
-
-        // 计算理想位置：保持适当距离，不要直接撞到玩家
         const idealDist = SHOOT_RANGE * 0.8;
         const shouldRetreat = distToPlayer < idealDist * 0.5;
-        const shouldApproach = distToPlayer > idealDist * 1.5;
-
-        // 调试日志
-        if (Math.random() < 0.05) {
-        }
-
         if (shouldRetreat) {
-          // 后退：选择远离玩家的方向
-          const retreatDirs = validDirs.filter(d => {
-            const v = dirToVec(d);
-            const nx = myCX + v.dx * 40;
-            const ny = myCY + v.dy * 40;
-            return Math.hypot(nx - playerCX, ny - playerCY) > distToPlayer;
-          });
-          this.currentDir = retreatDirs.length > 0
-            ? retreatDirs[Math.floor(Math.random() * retreatDirs.length)]
-            : validDirs[Math.floor(Math.random() * validDirs.length)];
-        } else if (shouldApproach) {
-          // 接近：优先选择能缩短距离的方向
-          const approachDirs = validDirs.filter(d => {
-            const v = dirToVec(d);
-            const nx = myCX + v.dx * 40;
-            const ny = myCY + v.dy * 40;
-            return Math.hypot(nx - playerCX, ny - playerCY) < distToPlayer;
-          });
-
-          // 关键修复：不要只向下冲，尝试横向包抄
-          if (approachDirs.length > 0) {
-            // 有能缩短距离的方向
-            const verticalDirs = approachDirs.filter(d => d === 'down');
-            const horizontalDirs = approachDirs.filter(d => d === 'left' || d === 'right');
-
-            if (horizontalDirs.length > 0 && Math.random() < 0.4) {
-              // 40%概率选择横向包抄
-              this.currentDir = horizontalDirs[Math.floor(Math.random() * horizontalDirs.length)];
-            } else {
-              // 否则继续接近（包括向下）
-              this.currentDir = approachDirs[Math.floor(Math.random() * approachDirs.length)];
-            }
-          } else {
-            // 没有能缩短距离的方向，随机选一个
-            this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
-          }
+          // 太近则后退拉开距离
+          this.currentDir = this._farthestDir(validDirs, playerCX, playerCY);
         } else {
-          // 保持距离：根据相对位置选择移动策略
-          if (Math.abs(dx) > Math.abs(dy) * 1.5) {
-            // 玩家在水平方向较远，优先左右移动
-            const sideDirs = validDirs.filter(d => d === 'left' || d === 'right');
-            this.currentDir = sideDirs.length > 0
-              ? sideDirs[Math.floor(Math.random() * sideDirs.length)]
-              : validDirs[Math.floor(Math.random() * validDirs.length)];
-          } else if (Math.abs(dy) > Math.abs(dx) * 1.5) {
-            // 玩家在垂直方向（上或下），根据距离决定
-            if (dy > 0) {
-              // 玩家在下，优先向下但也可以侧移
-              const downApproach = validDirs.filter(d => d === 'down' || d === 'left' || d === 'right');
-              this.currentDir = downApproach[Math.floor(Math.random() * downApproach.length)];
-            } else {
-              // 玩家在上，这是撤退情况
-              const retreatDirs = validDirs.filter(d => d === 'up' || d === 'left' || d === 'right');
-              this.currentDir = retreatDirs[Math.floor(Math.random() * retreatDirs.length)];
-            }
-          } else {
-            // 对角线方向，混合策略
-            this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
-          }
+          // 追击：直进 / 绕通道 / 兜底
+          this.currentDir = this._approachPlayer(validDirs, solids, otherTanks, playerCX, playerCY);
         }
-
-        // 进入射击范围则切换射击状态
         if (canShoot) {
           this.state = AI_STATE.SHOOT;
           this.stateTimer = 0;
         }
         break;
+      }
 
-      case AI_STATE.SHOOT:
-        // 射击时保持位置或侧移，不要直线冲锋
-        const shootDirs = validDirs.filter(d => {
-          const v = dirToVec(d);
-          // 优先侧向移动
-          return d === 'left' || d === 'right';
-        });
-        this.currentDir = shootDirs.length > 0 && Math.random() < 0.7
-          ? shootDirs[Math.floor(Math.random() * shootDirs.length)]
-          : validDirs[Math.floor(Math.random() * validDirs.length)];
-
-        // 如果玩家太远，退回追击
+      case AI_STATE.SHOOT: {
+        // 修复 TDZ bug：自行获取可行方向，不依赖 CHASE 分支的 validDirs
+        const shootValid = this._getValidDirs(solids, otherTanks);
+        if (shootValid.length > 0) {
+          const sideDirs = shootValid.filter(d => d === 'left' || d === 'right');
+          if (sideDirs.length > 0 && Math.random() < 0.7) {
+            this.currentDir = sideDirs[Math.floor(Math.random() * sideDirs.length)];
+          } else {
+            this.currentDir = this._closestDir(shootValid, playerCX, playerCY);
+          }
+        }
         if (!inRange) {
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
         break;
+      }
 
-      case AI_STATE.STUCK:
+      case AI_STATE.STUCK: {
         const stuckDirs = this._getValidDirs(solids, otherTanks);
         if (stuckDirs.length > 0) {
-          // 优先选择远离当前位置的方向
-          this.currentDir = stuckDirs[Math.floor(Math.random() * stuckDirs.length)];
+          this.currentDir = this._approachPlayer(stuckDirs, solids, otherTanks, playerCX, playerCY);
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
         break;
+      }
     }
 
-    // 检测是否卡住
+    // 卡住检测：完全不动，或长时间原地振荡（净位移极小）都视为卡住
     const moved = Math.abs(this.x - this.lastX) > 0.1 || Math.abs(this.y - this.lastY) > 0.1;
     if (!moved) {
       this.stuckCounter++;
-      if (this.stuckCounter > 30) {
-        this.state = AI_STATE.STUCK;
-        this.stateTimer = 0;
-      }
     } else {
+      this.stuckCounter = 0;
+    }
+    // 振荡检测：每 60 帧看净位移，若几乎为零说明在原地打转（如通道口被挤住），强制脱困
+    this._oscFrames = (this._oscFrames || 0) + 1;
+    if (this._oscFrames >= 60) {
+      const netDisp = Math.hypot(this.x - (this._oscX ?? this.x), this.y - (this._oscY ?? this.y));
+      if (netDisp < this.speed * 6) this.stuckCounter = 31; // 强制触发 STUCK
+      this._oscX = this.x;
+      this._oscY = this.y;
+      this._oscFrames = 0;
+    }
+    if (this.stuckCounter > 30) {
+      this.state = AI_STATE.STUCK;
+      this.stateTimer = 0;
       this.stuckCounter = 0;
     }
     this.lastX = this.x;
