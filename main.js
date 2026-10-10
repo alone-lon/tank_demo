@@ -1086,10 +1086,8 @@ class GameMap {
     this.rivers = [];
     this.ices = [];  // 雪地瓦片
     this.base = null;  // 基地
-    console.log('[Map] Parsing level, ROWS=', ROWS, 'COLS=', COLS, 'data.length=', this.data.length);
     for (let r = 0; r < ROWS; r++) {
       if (!this.data[r]) {
-        console.warn('[Map] WARNING: Row', r, 'is undefined!');
         continue;
       }
       for (let c = 0; c < COLS; c++) {
@@ -1104,7 +1102,6 @@ class GameMap {
         else if (type === T.BASE) this.base = rect(x, y, TILE, TILE);  // 解析基地
       }
     }
-    console.log('[Map] Parsed: bricks=', this.bricks.length, 'steels=', this.steels.length, 'base=', !!this.base);
   }
 
   // 碰撞检测用（砖块+钢板+基地）
@@ -1250,12 +1247,8 @@ class GameMap {
 
 class Game {
   constructor() {
-    console.log('[Game] Constructor starting...');
     this.canvas = document.getElementById('gameCanvas');
-    console.log('[Game] Canvas element:', this.canvas);
     this.ctx = this.canvas.getContext('2d');
-    console.log(`[Game] Canvas: ${this.canvas ? '存在' : '不存在'}`);
-    console.log(`[Game] Context: ${this.ctx ? '可用' : '不可用'}`);
     this.canvas.width = CW;
     this.canvas.height = CH;
 
@@ -1447,7 +1440,6 @@ class Game {
    * 玩家出生在安全空位（不卡在墙里）
    */
   _startGame() {
-    console.log('[Game] _startGame called, current state:', this.state);
     this.score = 0;
     this.level = 0;
     this.lives = 3;
@@ -1475,19 +1467,14 @@ class Game {
 
   /** 实际开始游戏的逻辑 */
   _doStartGame() {
-    console.log('[Game] _doStartGame called, state:', this.state);
     this.state = 'PLAYING';
     this.isTransitioning = false;
-    console.log('[Game] Overlay before hide:', this.overlay.classList.contains('hidden'));
     this.overlay.classList.add('hidden');
-    console.log('[Game] Overlay after hide:', this.overlay.classList.contains('hidden'));
     this.map = new GameMap(this.level);
-    console.log('[Game] Map created, bricks:', this.map.bricks.length, 'steels:', this.map.steels.length, 'base:', !!this.map.base);
     const playerPos = this._findSafeSpawn(this.map.bricks, this.map.steels, {
       minCol: 2, maxCol: COLS - 4, minRow: 10, maxRow: 10  // 保护墙上方
     }, [], this.map.rivers, null);
     this.player = new PlayerTank(playerPos.x, playerPos.y);
-    console.log('[Game] Player spawned at:', playerPos, 'active:', this.player.active);
     this.enemies = [];
     this.bullets = [];
     this.explosions = [];
@@ -1495,7 +1482,6 @@ class Game {
     this.floatingTexts = [];
     this._spawnWave();
     this._updateHUD();
-    console.log('[Tank] Game started, player:', this.player, 'map:', this.map);
   }
 
   /** 在指定区域内找一个安全的生成位置（不在固体瓦片内） */
@@ -1703,7 +1689,6 @@ class Game {
   _update(dt) {
     // 更新玩家（传入其他坦克，排除自己）
     if (!this.player || !this.player.active) {
-      console.log(`[Update] Player null or inactive, state=${this.state}`);
       return;
     }
 
@@ -1901,7 +1886,6 @@ class Game {
 
   _draw() {
     const ctx = this.ctx;
-    console.log(`[Draw] ctx=${!!ctx}, map=${!!this.map}, player=${!!this.player}, state=${this.state}`);
     if (!ctx) {
       console.error('Canvas context is null!');
       return;
@@ -1910,7 +1894,6 @@ class Game {
     // 清屏
     ctx.fillStyle = '#0a0a14';
     ctx.fillRect(0, 0, CW, CH);
-    console.log(`[Draw] map.bricks=${this.map?.bricks?.length}, map.base=${!!this.map?.base}, player.pos=${this.player?.x},${this.player?.y}`);
 
     // 绘制地图
     if (this.map) this.map.draw(ctx);
@@ -2005,7 +1988,5 @@ class Game {
 
 // ─── 启动游戏 ──────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  console.log('[Tank] DOMContentLoaded fired');
   window.game = new Game();
-  console.log('[Tank] Game instance created:', window.game);
 });

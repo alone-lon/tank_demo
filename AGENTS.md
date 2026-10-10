@@ -59,8 +59,8 @@ git push gitee master
 | 地图尺寸 | 13×13 格子，TILE=40px |
 | 画布尺寸 | 520×520px |
 | 坦克尺寸 | 36×36px |
-| 主要文件 | `main.js` (~1900行), `index.html`, `style.css` |
-| 当前版本 | v1.59 |
+| 主要文件 | `main.js` (~1990行), `index.html`, `style.css` |
+| 当前版本 | v1.74 |
 
 ---
 
