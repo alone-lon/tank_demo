@@ -1098,6 +1098,7 @@ class EnemyTank extends Tank {
     this.state = AI_STATE.PATROL;
     this.stateTimer = this.aiInterval; // 立即触发首次方向决策
     this.stuckCounter = 0;
+    this.moveDirHold = 0; // 方向保持计时器
     this.lastX = x;
     this.lastY = y;
     this.frozen = false;
@@ -1241,10 +1242,42 @@ class EnemyTank extends Tank {
   }
 
   /** 更新AI状态 */
+  /** 决策移动方向：禁止瞬间180°反向 + 被挡优先90°转弯 + 按状态偏向 */
+  _decideDirection(validDirs, solids, otherTanks, playerCX, playerCY, distToPlayer, canShoot) {
+    // 禁止瞬间 180° 反向（随机选向保留前进/转向，去掉反向），避免来回抽搐
+    const OPPOSITE = { up: 'down', down: 'up', left: 'right', right: 'left' };
+    const nonReverse = validDirs.filter(d => d !== OPPOSITE[this.currentDir]);
+    const randPool = nonReverse.length > 0 ? nonReverse : validDirs;
+
+    // 被挡时优先 90° 转弯（垂直方向），更自然
+    const wasBlocked = !this._canMove(this.currentDir, solids, otherTanks);
+    if (wasBlocked) {
+      const perp = (this.currentDir === 'up' || this.currentDir === 'down') ? ['left', 'right'] : ['up', 'down'];
+      const perpPool = randPool.filter(d => perp.includes(d));
+      if (perpPool.length > 0) return perpPool[Math.floor(Math.random() * perpPool.length)];
+    }
+
+    if (this.state === AI_STATE.SHOOT) {
+      // 射击时侧移保持射击角度
+      const sideDirs = randPool.filter(d => d === 'left' || d === 'right');
+      if (sideDirs.length > 0 && Math.random() < 0.7) return sideDirs[Math.floor(Math.random() * sideDirs.length)];
+      return this._closestDir(randPool, playerCX, playerCY);
+    }
+    if (this.state === AI_STATE.CHASE) {
+      const idealDist = SHOOT_RANGE * 0.8;
+      const shouldRetreat = distToPlayer < idealDist * 0.5;
+      if (Math.random() < 0.5) return randPool[Math.floor(Math.random() * randPool.length)]; // 随机不反向（漫游为主）
+      if (shouldRetreat) return this._farthestDir(validDirs, playerCX, playerCY); // 撤退允许反向
+      return this._approachPlayer(validDirs, solids, otherTanks, playerCX, playerCY); // 追击允许反向
+    }
+    // PATROL：随机漫游为主（用 randPool 不反向）
+    return Math.random() < 0.82
+      ? randPool[Math.floor(Math.random() * randPool.length)]
+      : this._approachPlayer(validDirs, solids, otherTanks, playerCX, playerCY);
+  }
+
   _updateAI(player, gameMap, otherTanks) {
     const solids = [...gameMap.bricks, ...gameMap.steels, ...gameMap.rivers, gameMap.base].filter(Boolean);
-
-    // 相对位置（统一欧氏距离，与方向评估一致）
     const playerCX = player.x + player.w / 2;
     const playerCY = player.y + player.h / 2;
     const myCX = this.x + this.w / 2;
@@ -1255,96 +1288,46 @@ class EnemyTank extends Tank {
 
     this.stateTimer += 16;
 
+    // ── 1) 状态转移（每帧评估）──
     switch (this.state) {
-      case AI_STATE.PATROL: {
-        if (inRange) {
-          this.state = AI_STATE.CHASE;
-          this.stateTimer = 0;
-        }
-        const patrolBlocked = !this._canMove(this.currentDir, solids, otherTanks);
-        if (this.stateTimer >= this.aiInterval || patrolBlocked) {
-          this.stateTimer = 0;
-          const patrolDirs = this._getValidDirs(solids, otherTanks);
-          if (patrolDirs.length > 0) {
-            // 随机漫游为主（80%），偶尔朝玩家（20%）—— 自由转向、随机走动
-            this.currentDir = Math.random() < 0.8
-              ? patrolDirs[Math.floor(Math.random() * patrolDirs.length)]
-              : this._approachPlayer(patrolDirs, solids, otherTanks, playerCX, playerCY);
-          }
-        }
+      case AI_STATE.PATROL:
+        if (inRange) { this.state = AI_STATE.CHASE; this.stateTimer = 0; }
         break;
-      }
+      case AI_STATE.CHASE:
+        if (canShoot) { this.state = AI_STATE.SHOOT; this.stateTimer = 0; }
+        break;
+      case AI_STATE.SHOOT:
+        if (!inRange) { this.state = AI_STATE.CHASE; this.stateTimer = 0; }
+        break;
+      case AI_STATE.STUCK:
+        this.state = AI_STATE.CHASE; this.stateTimer = 0;
+        break;
+    }
 
-      case AI_STATE.CHASE: {
-        const validDirs = this._getValidDirs(solids, otherTanks);
-        if (validDirs.length === 0) break;
-        const idealDist = SHOOT_RANGE * 0.8;
-        const shouldRetreat = distToPlayer < idealDist * 0.5;
-        // 追击也带随机性（50%），避免死盯玩家锁死单一轴
-        if (Math.random() < 0.5) {
-          this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
-        } else if (shouldRetreat) {
-          // 太近则后退拉开距离
-          this.currentDir = this._farthestDir(validDirs, playerCX, playerCY);
-        } else {
-          // 追击：直进 / 绕通道 / 兜底
-          this.currentDir = this._approachPlayer(validDirs, solids, otherTanks, playerCX, playerCY);
-        }
-        if (canShoot) {
-          this.state = AI_STATE.SHOOT;
-          this.stateTimer = 0;
-        }
-        break;
-      }
-
-      case AI_STATE.SHOOT: {
-        // 修复 TDZ bug：自行获取可行方向，不依赖 CHASE 分支的 validDirs
-        const shootValid = this._getValidDirs(solids, otherTanks);
-        if (shootValid.length > 0) {
-          const sideDirs = shootValid.filter(d => d === 'left' || d === 'right');
-          if (sideDirs.length > 0 && Math.random() < 0.7) {
-            this.currentDir = sideDirs[Math.floor(Math.random() * sideDirs.length)];
-          } else {
-            this.currentDir = this._closestDir(shootValid, playerCX, playerCY);
-          }
-        }
-        if (!inRange) {
-          this.state = AI_STATE.CHASE;
-          this.stateTimer = 0;
-        }
-        break;
-      }
-
-      case AI_STATE.STUCK: {
-        const stuckDirs = this._getValidDirs(solids, otherTanks);
-        if (stuckDirs.length > 0) {
-          this.currentDir = this._approachPlayer(stuckDirs, solids, otherTanks, playerCX, playerCY);
-          this.state = AI_STATE.CHASE;
-          this.stateTimer = 0;
-        }
-        break;
+    // ── 2) 方向决策（方向保持 gate：未到期且未被挡则不换向，杜绝抖动）──
+    const DIR_HOLD = 24; // 保持方向约 24 帧（~0.38秒），直线与转向平衡
+    const blocked = !this._canMove(this.currentDir, solids, otherTanks);
+    this.moveDirHold = (this.moveDirHold || 0) - 1;
+    if (blocked || this.moveDirHold <= 0) {
+      this.moveDirHold = DIR_HOLD;
+      const validDirs = this._getValidDirs(solids, otherTanks);
+      if (validDirs.length > 0) {
+        this.currentDir = this._decideDirection(validDirs, solids, otherTanks, playerCX, playerCY, distToPlayer, canShoot);
       }
     }
 
-    // 卡住检测：完全不动，或长时间原地振荡（净位移极小）都视为卡住
+    // ── 3) 卡住检测（不动/原地振荡 → STUCK，强制换向脱困）──
     const moved = Math.abs(this.x - this.lastX) > 0.1 || Math.abs(this.y - this.lastY) > 0.1;
-    if (!moved) {
-      this.stuckCounter++;
-    } else {
-      this.stuckCounter = 0;
-    }
-    // 振荡检测：每 60 帧看净位移，若几乎为零说明在原地打转（如通道口被挤住），强制脱困
+    this.stuckCounter = moved ? 0 : this.stuckCounter + 1;
     this._oscFrames = (this._oscFrames || 0) + 1;
     if (this._oscFrames >= 60) {
       const netDisp = Math.hypot(this.x - (this._oscX ?? this.x), this.y - (this._oscY ?? this.y));
       if (netDisp < this.speed * 6) this.stuckCounter = 31; // 强制触发 STUCK
-      this._oscX = this.x;
-      this._oscY = this.y;
-      this._oscFrames = 0;
+      this._oscX = this.x; this._oscY = this.y; this._oscFrames = 0;
     }
     if (this.stuckCounter > 30) {
       this.state = AI_STATE.STUCK;
-      this.stateTimer = 0;
+      this.moveDirHold = 0; // 立即换向脱困
       this.stuckCounter = 0;
     }
     this.lastX = this.x;
