@@ -38,6 +38,17 @@ node -c "E:/2026_learning/wolin_learning_20260817/20261008learning_homework/tank
 cd "E:/2026_learning/wolin_learning_20260817/20261008learning_homework/tank" && start index.html
 ```
 
+### 6. Git 提交与推送（必须）
+每次修改完代码后，必须执行以下步骤：
+```bash
+cd "E:/2026_learning/wolin_learning_20260817/20261008learning_homework/tank"
+git add -A
+git commit -m "v1.XX 简短描述改动内容"
+git push github master
+git push gitee master
+```
+> **注意**：两个仓库都要推（github + gitee），版本号与 `更新记录.md` 保持一致
+
 ---
 
 ## 🎮 项目基本信息
