@@ -1182,6 +1182,14 @@ class EnemyTank extends Tank {
     const dx = playerCX - myCX;
     const dy = playerCY - myCY;
 
+    // 获取当前可行方向
+    const currentValidDirs = this._getValidDirs(solids, otherTanks);
+
+    // 调试：每帧打印敌人位置和可行方向
+    if (Math.random() < 0.1) {
+      console.log(`[Enemy ${this.type}] pos=(${this.x},${this.y}), dir=${this.currentDir}, valid=[${currentValidDirs.join(',')}], state=${this.state}, dist=${distToPlayer.toFixed(0)}`);
+    }
+
     switch (this.state) {
       case AI_STATE.PATROL:
         // 检测到玩家则切换追击
@@ -1217,6 +1225,11 @@ class EnemyTank extends Tank {
         const idealDist = SHOOT_RANGE * 0.8;
         const shouldRetreat = distToPlayer < idealDist * 0.5;
         const shouldApproach = distToPlayer > idealDist * 1.5;
+
+        // 调试日志
+        if (Math.random() < 0.05) {
+          console.log(`[Enemy] state=${this.state}, dist=${distToPlayer.toFixed(0)}, validDirs=[${validDirs.join(',')}], targetDir=${targetDir}`);
+        }
 
         if (shouldRetreat) {
           // 后退：选择远离玩家的方向
@@ -1733,6 +1746,8 @@ class Game {
       return; // 奖励选择用数字键
     }
     if (this.state === 'MENU' || this.state === 'GAMEOVER_WIN' || this.state === 'GAMEOVER_LOSE') {
+      // 清除之前的调试日志
+      console.log('[Game] 开始游戏，调试日志已启用');
       this._startGame();
     }
   }
