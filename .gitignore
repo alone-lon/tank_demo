@@ -1,2 +1,35 @@
-# 忽略 Windows/null 设备文件
+# Windows 系统文件
 nul
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.LNK
+
+# 备份文件
+*.bak
+*.backup
+*.orig
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 临时文件
+*.tmp
+*.temp
+~$*
+
+# 日志文件
+*.log
+
+# 操作系统产物
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
