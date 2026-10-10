@@ -1715,12 +1715,12 @@ class Game {
 
     // 强制显示触控面板（方便测试）
     const touchControls = document.getElementById('touch-controls');
-    if (isTouchDevice) {
+    if (touchControls) {
+      // 无条件显示，方便测试
       touchControls.style.display = 'flex';
-      console.log('[Game] 检测到触控设备，显示虚拟按键');
+      console.log('[Game] 触控面板已显示，isTouchDevice=' + isTouchDevice);
     } else {
-      // 添加一个测试按钮，方便PC上测试触控
-      console.log('[Game] 非触控设备，可用鼠标点击按钮测试');
+      console.error('[Game] 找不到 #touch-controls 元素！');
     }
 
     const btns = document.querySelectorAll('#touch-controls [data-key]');
