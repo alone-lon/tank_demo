@@ -930,7 +930,7 @@ class EnemyTank extends Tank {
             ? retreatDirs[Math.floor(Math.random() * retreatDirs.length)]
             : validDirs[Math.floor(Math.random() * validDirs.length)];
         } else if (shouldApproach) {
-          // 接近：选择朝向玩家的方向
+          // 接近：优先选择能缩短距离的方向，包括横向包抄
           const approachDirs = validDirs.filter(d => {
             const v = dirToVec(d);
             const nx = myCX + v.dx * 40;
@@ -941,13 +941,26 @@ class EnemyTank extends Tank {
             ? approachDirs[Math.floor(Math.random() * approachDirs.length)]
             : validDirs[Math.floor(Math.random() * validDirs.length)];
         } else {
-          // 保持距离：侧向移动寻找射击角度
-          if (Math.random() < 0.4 && Math.abs(dx) > Math.abs(dy)) {
-            // 玩家在水平方向，横向移动
-            const sideDirs = validDirs.filter(d => d === (dx > 0 ? 'right' : 'left'));
-            this.currentDir = sideDirs.length > 0 ? sideDirs[0] : validDirs[Math.floor(Math.random() * validDirs.length)];
+          // 保持距离：根据相对位置选择移动策略
+          if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+            // 玩家在水平方向较远，优先左右移动
+            const sideDirs = validDirs.filter(d => d === 'left' || d === 'right');
+            this.currentDir = sideDirs.length > 0
+              ? sideDirs[Math.floor(Math.random() * sideDirs.length)]
+              : validDirs[Math.floor(Math.random() * validDirs.length)];
+          } else if (Math.abs(dy) > Math.abs(dx) * 1.5) {
+            // 玩家在垂直方向（上或下），根据距离决定
+            if (dy > 0) {
+              // 玩家在下，优先向下但也可以侧移
+              const downApproach = validDirs.filter(d => d === 'down' || d === 'left' || d === 'right');
+              this.currentDir = downApproach[Math.floor(Math.random() * downApproach.length)];
+            } else {
+              // 玩家在上，这是撤退情况
+              const retreatDirs = validDirs.filter(d => d === 'up' || d === 'left' || d === 'right');
+              this.currentDir = retreatDirs[Math.floor(Math.random() * retreatDirs.length)];
+            }
           } else {
-            // 随机选择一个方向
+            // 对角线方向，混合策略
             this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
           }
         }
