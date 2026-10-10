@@ -792,7 +792,7 @@ class EnemyTank extends Tank {
     this.maxHp = config.hp;
     this.scoreValue = config.score;
     this.aiTimer = 0;
-    this.aiInterval = 700; // ms 换方向间隔（缩短，避免开局长时间单向冲锋）
+    this.aiInterval = 400; // ms 换方向间隔（缩短，避免开局长时间单向冲锋）
     this.currentDir = ['down', 'left', 'right'][Math.floor(Math.random() * 3)]; // 初始方向随机，避免集体向下冲锋
     this.fireRate = config.fireRate;
     this.state = AI_STATE.PATROL;
@@ -961,14 +961,15 @@ class EnemyTank extends Tank {
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
-        if (this.stateTimer >= this.aiInterval) {
+        const patrolBlocked = !this._canMove(this.currentDir, solids, otherTanks);
+        if (this.stateTimer >= this.aiInterval || patrolBlocked) {
           this.stateTimer = 0;
           const patrolDirs = this._getValidDirs(solids, otherTanks);
           if (patrolDirs.length > 0) {
-            // 朝玩家推进（含绕通道），少量随机让路径多样化、避免全员同路径
+            // 随机漫游为主（80%），偶尔朝玩家（20%）—— 自由转向、随机走动
             this.currentDir = Math.random() < 0.8
-              ? this._approachPlayer(patrolDirs, solids, otherTanks, playerCX, playerCY)
-              : patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
+              ? patrolDirs[Math.floor(Math.random() * patrolDirs.length)]
+              : this._approachPlayer(patrolDirs, solids, otherTanks, playerCX, playerCY);
           }
         }
         break;
@@ -979,7 +980,10 @@ class EnemyTank extends Tank {
         if (validDirs.length === 0) break;
         const idealDist = SHOOT_RANGE * 0.8;
         const shouldRetreat = distToPlayer < idealDist * 0.5;
-        if (shouldRetreat) {
+        // 追击也带随机性（50%），避免死盯玩家锁死单一轴
+        if (Math.random() < 0.5) {
+          this.currentDir = validDirs[Math.floor(Math.random() * validDirs.length)];
+        } else if (shouldRetreat) {
           // 太近则后退拉开距离
           this.currentDir = this._farthestDir(validDirs, playerCX, playerCY);
         } else {
