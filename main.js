@@ -882,11 +882,20 @@ class EnemyTank extends Tank {
           this.state = AI_STATE.CHASE;
           this.stateTimer = 0;
         }
-        // 随机换向
+        // 随机换向（包括向下朝玩家方向）
         if (this.stateTimer >= this.aiInterval) {
           this.stateTimer = 0;
           const patrolDirs = this._getValidDirs(solids, otherTanks);
-          this.currentDir = patrolDirs.length > 0 ? patrolDirs[Math.floor(Math.random() * patrolDirs.length)] : this.currentDir;
+          // 巡逻时有一定概率朝玩家方向移动
+          if (patrolDirs.length > 0) {
+            const dirToPlayer = this._dirToTarget(player.x + player.w/2, player.y + player.h/2);
+            // 70%概率朝玩家移动，30%随机
+            if (patrolDirs.includes(dirToPlayer) && Math.random() < 0.7) {
+              this.currentDir = dirToPlayer;
+            } else {
+              this.currentDir = patrolDirs[Math.floor(Math.random() * patrolDirs.length)];
+            }
+          }
         }
         break;
 
